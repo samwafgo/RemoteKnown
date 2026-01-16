@@ -3,6 +3,10 @@
   "version": "1.0.1",
   "description": "远程控制感知与审计工具",
   "main": "main.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/samwafgo/RemoteKnown.git"
+  },
   "scripts": {
     "start": "electron .",
     "build": "electron-builder",
@@ -12,6 +16,7 @@
   "build": {
     "appId": "com.remoteknown.app",
     "productName": "远程知道了",
+    "publish": null,
     "win": {
       "target": "nsis",
       "icon": "icon.ico",

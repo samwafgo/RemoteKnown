@@ -3,6 +3,7 @@ package detector
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 	"unsafe"
@@ -13,6 +14,11 @@ import (
 )
 
 type WindowsDetector struct {
+	// 进程缓存，避免频繁查询
+	processCache     map[string][]*process.Process
+	processCacheTime time.Time
+	cacheMutex       sync.RWMutex
+	cacheDuration    time.Duration
 }
 
 var (
@@ -48,17 +54,92 @@ var remoteTools = []RemoteTool{
 }
 
 func NewWindowsDetector() *WindowsDetector {
-	return &WindowsDetector{}
+	return &WindowsDetector{
+		processCache:  make(map[string][]*process.Process),
+		cacheDuration: 3 * time.Second, // 缓存3秒，减少重复查询
+	}
+}
+
+// findProcessesByName 通过进程名查找进程（优化版本，带缓存）
+func (d *WindowsDetector) findProcessesByName(processName string) []*process.Process {
+	// 检查缓存
+	d.cacheMutex.RLock()
+	if time.Since(d.processCacheTime) < d.cacheDuration {
+		if cached, ok := d.processCache[processName]; ok {
+			d.cacheMutex.RUnlock()
+			return cached
+		}
+	}
+	d.cacheMutex.RUnlock()
+
+	// 缓存过期或不存在，重新查询
+	var matchedProcesses []*process.Process
+
+	// 创建进程快照
+	snapshot, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
+	if err != nil {
+		return matchedProcesses
+	}
+	defer windows.CloseHandle(snapshot)
+
+	var procEntry windows.ProcessEntry32
+	procEntry.Size = uint32(unsafe.Sizeof(procEntry))
+
+	// 获取第一个进程
+	err = windows.Process32First(snapshot, &procEntry)
+	if err != nil {
+		return matchedProcesses
+	}
+
+	processNameLower := strings.ToLower(processName)
+
+	// 遍历所有进程
+	for {
+		// 将进程名从 UTF16 转换为字符串
+		exeFile := windows.UTF16ToString(procEntry.ExeFile[:])
+
+		// 比较进程名（不区分大小写）
+		if strings.EqualFold(exeFile, processName) || strings.EqualFold(strings.ToLower(exeFile), processNameLower) {
+			// 创建 Process 对象
+			p, err := process.NewProcess(int32(procEntry.ProcessID))
+			if err == nil {
+				matchedProcesses = append(matchedProcesses, p)
+			}
+		}
+
+		// 获取下一个进程
+		err = windows.Process32Next(snapshot, &procEntry)
+		if err != nil {
+			break
+		}
+	}
+
+	// 更新缓存
+	d.cacheMutex.Lock()
+	d.processCache[processName] = matchedProcesses
+	d.processCacheTime = time.Now()
+	d.cacheMutex.Unlock()
+
+	return matchedProcesses
+}
+
+// clearCache 清除进程缓存（在检测周期开始时调用）
+func (d *WindowsDetector) clearCache() {
+	d.cacheMutex.Lock()
+	d.processCache = make(map[string][]*process.Process)
+	d.cacheMutex.Unlock()
 }
 
 // DetectRemoteTools 检测远程工具：进程存在 + 窗口类名存在 = 被远程控制
 func (d *WindowsDetector) DetectRemoteTools() ([]Signal, error) {
 	var signals []Signal
 
-	procs, err := process.Processes()
-	if err != nil {
-		return nil, fmt.Errorf("获取进程列表失败: %w", err)
-	}
+	// 优化：清除缓存，确保每次检测都是最新的
+	// 但在同一次检测周期内，多个工具可以共享缓存
+	d.clearCache()
+
+	// 优化：不再获取所有进程，而是使用进程名直接查找
+	// 这样可以大幅减少系统调用次数
 
 	// 检查每个远程工具
 	for _, tool := range remoteTools {
@@ -66,18 +147,15 @@ func (d *WindowsDetector) DetectRemoteTools() ([]Signal, error) {
 		var matchedProcesses []*process.Process
 
 		if tool.ProcessName != "" {
-			// 如果配置了进程名，只检查匹配的进程
-			for _, p := range procs {
-				name, err := p.Name()
-				if err != nil {
-					continue
-				}
-				if strings.EqualFold(name, tool.ProcessName) {
-					matchedProcesses = append(matchedProcesses, p)
-				}
-			}
+			// 优化：使用进程名直接查找，而不是遍历所有进程
+			matchedProcesses = d.findProcessesByName(tool.ProcessName)
 		} else {
-			// 如果进程名为空，检查所有进程（用于检测命令行参数，包括进程名为空的情况）
+			// 如果进程名为空，需要检查所有进程（用于检测命令行参数）
+			// 这种情况应该避免，因为会导致性能问题
+			procs, err := process.Processes()
+			if err != nil {
+				continue
+			}
 			matchedProcesses = procs
 		}
 

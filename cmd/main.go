@@ -1,23 +1,26 @@
 package main
 
 import (
-	"io"
-	"log"
-	"os"
-	"os/signal"
-	"path/filepath"
-	"syscall"
-
 	"RemoteKnown/internal/detector"
 	"RemoteKnown/internal/notifier"
 	"RemoteKnown/internal/server"
 	"RemoteKnown/internal/storage"
+	"io"
+	"log"
+	_ "net/http/pprof"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"syscall"
 )
 
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	log.Println("RemoteKnown 守护进程启动...")
-
+	/*go func() {
+		// 开启一个用于调试的端口，比如 6060
+		log.Println(http.ListenAndServe("0.0.0.0:6060", nil))
+	}()*/
 	// 获取用户配置目录 (AppData/Roaming) 以确保持久化存储
 	userConfigDir, err := os.UserConfigDir()
 	if err != nil {

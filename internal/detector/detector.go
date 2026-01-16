@@ -75,7 +75,8 @@ func NewDetector(storage *storage.Storage, notifier Notifier) *Detector {
 }
 
 func (d *Detector) detectionLoop() {
-	ticker := time.NewTicker(2 * time.Second)
+	// 优化：将检测间隔从2秒增加到5秒，减少CPU占用
+	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
 	for range ticker.C {

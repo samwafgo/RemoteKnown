@@ -1,0 +1,39 @@
+# Binaries
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Logs
+*.log
+
+# Databases
+*.db
+*.sqlite
+
+# Go
+# go.sum is usually committed, so not ignoring it
+go.work
+
+# Node.js / Electron
+node_modules/
+dist/
+out/
+build/
+.npmrc
+
+# IDEs
+.idea/
+.vscode/
+.trae/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+RemoteKnown-daemon.exe
+web/dist/
+web/node_modules/

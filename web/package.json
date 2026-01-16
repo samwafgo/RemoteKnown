@@ -1,0 +1,52 @@
+{
+  "name": "RemoteKnown",
+  "version": "1.0.1",
+  "description": "远程控制感知与审计工具",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder",
+    "build:win": "electron-builder --win",
+    "build:mac": "electron-builder --mac"
+  },
+  "build": {
+    "appId": "com.remoteknown.app",
+    "productName": "远程知道了",
+    "win": {
+      "target": "nsis",
+      "icon": "icon.ico",
+      "artifactName": "RemoteKnown-Setup-${version}.exe"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "uninstallDisplayName": "远程知道了 ${version}"
+    },
+    "electronDownload": {
+      "mirror": "https://npmmirror.com/mirrors/electron/"
+    },
+    "extraResources": [
+      {
+        "from": "../RemoteKnown-daemon.exe",
+        "to": "./"
+      }
+    ]
+  },
+  "keywords": [
+    "remote",
+    "security",
+    "audit"
+  ],
+  "author": "RemoteKnown",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.1",
+    "png-to-ico": "^2.1.8"
+  },
+  "dependencies": {
+    "jimp": "^1.6.0"
+  }
+}

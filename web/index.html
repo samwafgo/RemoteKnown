@@ -1,0 +1,1332 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <title>远程知道了 · 远程行为审计</title>
+    <link rel="icon" href="assets/logo.png" type="image/x-icon">
+    <style>
+        body {
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: #f4f6f9;
+            color: #333;
+            -webkit-user-select: none;
+            overflow: hidden;
+            /* 防止全局滚动条 */
+        }
+
+        header {
+            background: #1f2937;
+            color: #fff;
+            padding: 0;
+            height: 48px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 15px;
+            -webkit-app-region: drag;
+        }
+
+        .header-left {
+            padding-left: 20px;
+            display: flex;
+            align-items: center;
+        }
+
+        .header-right {
+            display: flex;
+            -webkit-app-region: no-drag;
+        }
+
+        .window-btn {
+            width: 46px;
+            height: 48px;
+            border: none;
+            background: transparent;
+            color: #fff;
+            font-size: 14px;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+
+        .window-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .window-btn.close:hover {
+            background: #e81123;
+        }
+
+        .container {
+            padding: 20px;
+        }
+
+        .status-bar {
+            display: flex;
+            align-items: center;
+            background: #fff;
+            padding: 16px;
+            border-radius: 8px;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+        }
+
+        .dot {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            margin-right: 10px;
+        }
+
+        .remote {
+            background: #dc2626;
+        }
+
+        .safe {
+            background: #16a34a;
+        }
+
+        .status-text {
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .meta {
+            margin-left: auto;
+            font-size: 13px;
+            color: #666;
+            display: none;
+            /* 默认隐藏，仅在检测到远程时显示 */
+            margin-right: 16px;
+            /* 添加右侧间距，避免紧贴分隔线 */
+        }
+
+        .status-actions {
+            /* 如果 .meta 隐藏，status-actions 需要自动靠右 */
+            margin-left: auto;
+            padding-left: 16px;
+            border-left: 1px solid #e5e7eb;
+            display: flex;
+            align-items: center;
+        }
+
+        .action-link {
+            background: none;
+            border: none;
+            color: #3b82f6;
+            font-size: 13px;
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            transition: background 0.2s;
+        }
+
+        .action-link:hover {
+            background: #eff6ff;
+        }
+
+
+        .card {
+            background: #fff;
+            border-radius: 8px;
+            padding: 16px;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+        }
+
+        .card h3 {
+            margin-top: 0;
+            font-size: 15px;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .refresh-btn {
+            background: transparent;
+            color: #666;
+            border: none;
+            border-radius: 4px;
+            padding: 4px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 28px;
+            height: 28px;
+        }
+
+        .refresh-btn:hover {
+            background: #f3f4f6;
+            color: #3b82f6;
+        }
+
+        .refresh-btn:active {
+            background: #e5e7eb;
+        }
+
+        .refresh-btn:disabled {
+            background: #9ca3af;
+            cursor: not-allowed;
+        }
+
+        #signals {
+            min-height: 30px;
+            max-height: 30px;
+            overflow-x: auto;
+            overflow-y: hidden;
+            white-space: nowrap;
+            padding: 4px 0;
+        }
+
+        .signal {
+            display: inline-block;
+            padding: 4px 8px;
+            background: #e0f2fe;
+            color: #0369a1;
+            border-radius: 4px;
+            font-size: 12px;
+            margin: 4px 4px 0 0;
+            white-space: nowrap;
+        }
+
+        .signal.bad {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        .table-container {
+            overflow-x: auto;
+            overflow-y: visible;
+            max-height: none;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        th,
+        td {
+            padding: 8px;
+            border-bottom: 1px solid #eee;
+            text-align: left;
+        }
+
+        th {
+            background: #fafafa;
+        }
+
+        .pagination {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid #eee;
+        }
+
+        .pagination-btn {
+            background: #fff;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 6px 12px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+            color: #333;
+        }
+
+        .pagination-btn:hover:not(:disabled) {
+            background: #f5f5f5;
+            border-color: #3b82f6;
+        }
+
+        .pagination-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .pagination-btn.active {
+            background: #3b82f6;
+            color: #fff;
+            border-color: #3b82f6;
+        }
+
+        .pagination-info {
+            font-size: 13px;
+            color: #666;
+            margin: 0 8px;
+        }
+
+        .settings-btn {
+            width: 46px;
+            height: 48px;
+            border: none;
+            background: transparent;
+            color: #fff;
+            font-size: 18px;
+            cursor: pointer;
+            transition: background 0.15s;
+            -webkit-app-region: no-drag;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .settings-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            -webkit-app-region: no-drag;
+        }
+
+        .modal-content {
+            background-color: #fff;
+            margin: 10% auto;
+            padding: 0;
+            border-radius: 8px;
+            width: 500px;
+            max-width: 90%;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+        }
+
+        .modal-header {
+            background: #1f2937;
+            color: #fff;
+            padding: 16px 20px;
+            border-radius: 8px 8px 0 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .modal-header h3 {
+            margin: 0;
+            font-size: 16px;
+        }
+
+        .modal-close {
+            background: transparent;
+            border: none;
+            color: #fff;
+            font-size: 20px;
+            cursor: pointer;
+            padding: 0;
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-close:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+        }
+
+        .modal-body {
+            padding: 20px;
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 6px;
+            font-size: 13px;
+            font-weight: 500;
+            color: #333;
+        }
+
+        .form-group input,
+        .form-group select {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 13px;
+            box-sizing: border-box;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus {
+            outline: none;
+            border-color: #3b82f6;
+        }
+
+        .form-group .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .form-group input[type="checkbox"] {
+            width: auto;
+            margin: 0;
+        }
+
+        .form-group .help-text {
+            font-size: 12px;
+            color: #666;
+            margin-top: 4px;
+        }
+
+        .modal-footer {
+            padding: 16px 20px;
+            border-top: 1px solid #eee;
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+        }
+
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .btn-primary {
+            background: #3b82f6;
+            color: #fff;
+        }
+
+        .btn-primary:hover {
+            background: #2563eb;
+        }
+
+        .btn-secondary {
+            background: #e5e7eb;
+            color: #333;
+        }
+
+        .btn-secondary:hover {
+            background: #d1d5db;
+        }
+
+        .test-result {
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            margin-top: 8px;
+        }
+
+        .test-result.success {
+            background: #d1fae5;
+            color: #065f46;
+            border: 1px solid #6ee7b7;
+        }
+
+        .test-result.error {
+            background: #fee2e2;
+            color: #991b1b;
+            border: 1px solid #fca5a5;
+        }
+
+        .test-result.info {
+            background: #dbeafe;
+            color: #1e40af;
+            border: 1px solid #93c5fd;
+        }
+
+        /* Settings Layout */
+        .settings-layout {
+            display: flex;
+            min-height: 300px;
+            padding: 0;
+        }
+
+        .settings-sidebar {
+            width: 140px;
+            background: #f9fafb;
+            border-right: 1px solid #eee;
+            padding: 16px 0;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .tab-btn {
+            padding: 10px 20px;
+            text-align: left;
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            font-size: 13px;
+            color: #666;
+            transition: all 0.2s;
+            border-left: 3px solid transparent;
+        }
+
+        .tab-btn:hover {
+            background: #f3f4f6;
+            color: #333;
+        }
+
+        .tab-btn.active {
+            background: #fff;
+            color: #3b82f6;
+            border-left-color: #3b82f6;
+            font-weight: 500;
+        }
+
+        .settings-content {
+            flex: 1;
+            padding: 24px;
+            overflow-y: auto;
+        }
+
+        .tab-pane {
+            display: none;
+        }
+
+        .tab-pane.active {
+            display: block;
+            animation: fadeIn 0.2s ease;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(5px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .about-info {
+            text-align: center;
+            padding: 20px 0;
+        }
+
+        .about-info img {
+            width: 80px;
+            height: 80px;
+            margin-bottom: 16px;
+        }
+
+        .about-info h4 {
+            margin: 0 0 8px 0;
+            font-size: 18px;
+            color: #1f2937;
+        }
+
+        .about-info p {
+            margin: 4px 0;
+            color: #666;
+            font-size: 13px;
+        }
+
+        .copyright {
+            margin-top: 32px;
+            font-size: 12px;
+            color: #9ca3af;
+        }
+
+        .repo-links {
+            display: flex;
+            justify-content: center;
+            gap: 12px;
+            margin-top: 20px;
+        }
+
+        .repo-link {
+            display: inline-flex;
+            align-items: center;
+            padding: 6px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            color: #333;
+            text-decoration: none;
+            font-size: 13px;
+            transition: all 0.2s;
+            cursor: pointer;
+            background: #fff;
+        }
+
+        .repo-link:hover {
+            border-color: #3b82f6;
+            color: #3b82f6;
+            background: #f8fbff;
+        }
+
+        /* Adjust modal body padding for split layout */
+        .modal-body {
+            padding: 0;
+        }
+    </style>
+</head>
+
+<body>
+
+    <header>
+        <div class="header-left">
+            <span>远程知道了 · 本机远程控制行为审计</span>
+        </div>
+        <div class="header-right">
+            <button class="settings-btn" onclick="openSettingsModal()" title="系统设置">⚙️</button>
+            <button class="window-btn" onclick="window.remoteAudit.minimize()">─</button>
+            <button class="window-btn" onclick="window.remoteAudit.maximize()">□</button>
+            <button class="window-btn close" onclick="window.remoteAudit.close()">✕</button>
+        </div>
+    </header>
+
+    <!-- 系统设置模态框 -->
+    <div id="settingsModal" class="modal">
+        <div class="modal-content" style="width: 600px;">
+            <div class="modal-header">
+                <h3>系统设置</h3>
+                <button class="modal-close" onclick="closeSettingsModal()">✕</button>
+            </div>
+
+            <div class="modal-body settings-layout">
+                <!-- 左侧导航 -->
+                <div class="settings-sidebar">
+                    <button class="tab-btn active" onclick="switchTab('notification')">通知</button>
+                    <button class="tab-btn" onclick="switchTab('feedback')">反馈</button>
+                    <button class="tab-btn" onclick="switchTab('about')">关于</button>
+                </div>
+
+                <!-- 右侧内容 -->
+                <div class="settings-content">
+
+                    <!-- 通知设置 Tab -->
+                    <div id="tab-notification" class="tab-pane active">
+                        <form id="notificationForm">
+                            <div class="form-group">
+                                <div class="checkbox-group">
+                                    <input type="checkbox" id="notificationEnabled" name="enabled">
+                                    <label for="notificationEnabled">启用通知</label>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="notificationType">通知类型</label>
+                                <select id="notificationType" name="type">
+                                    <option value="feishu">飞书</option>
+                                    <option value="dingtalk">钉钉</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="webhookURL">Webhook URL</label>
+                                <input type="text" id="webhookURL" name="webhook_url" placeholder="请输入Webhook地址">
+                                <div class="help-text">飞书或钉钉机器人的Webhook地址</div>
+                            </div>
+                            <div class="form-group" id="secretGroup" style="display: none;">
+                                <label for="webhookSecret">签名密钥（可选）</label>
+                                <input type="text" id="webhookSecret" name="secret" placeholder="钉钉签名密钥（可选）">
+                                <div class="help-text">仅钉钉需要，如果机器人配置了签名验证，请填写</div>
+                            </div>
+                            <div class="form-group">
+                                <div id="testResult"
+                                    style="display: none; padding: 8px; border-radius: 4px; font-size: 12px; margin-top: 8px;">
+                                </div>
+                            </div>
+                            <div style="margin-top: 24px; text-align: right;">
+                                <button type="button" class="btn btn-secondary" onclick="testNotification()"
+                                    id="testBtn">测试通知</button>
+                                <button type="button" class="btn btn-primary"
+                                    onclick="saveNotificationConfig()">保存配置</button>
+                            </div>
+                        </form>
+                    </div>
+
+                    <!-- 反馈 Tab -->
+                    <div id="tab-feedback" class="tab-pane">
+                        <div style="text-align: center; padding: 12px 0;">
+                            <h4 style="margin: 0 0 16px 0; font-size: 16px; color: #1f2937;">反馈与交流</h4>
+
+                            <!-- 公众号二维码 -->
+                            <div style="margin-bottom: 16px;">
+                                <img src="assets/mp_samwaf.png" alt="微信公众号"
+                                    style="width: 350px; height: 100px; border: 1px solid #e5e7eb; border-radius: 6px; box-shadow: 0 1px 4px rgba(0,0,0,0.08);">
+                                <p style="margin: 8px 0 0 0; font-size: 12px; color: #666;">扫码关注微信公众号，获取最新动态和技术交流</p>
+                            </div>
+
+                            <!-- 邮箱联系 -->
+                            <div style="margin-bottom: 16px; padding: 12px; background: #f9fafb; border-radius: 6px;">
+                                <p style="margin: 0 0 6px 0; font-size: 13px; color: #333; font-weight: 500;">邮箱联系</p>
+                                <a href="mailto:samwafgo@gmail.com"
+                                    style="color: #3b82f6; text-decoration: none; font-size: 13px;"
+                                    onmouseover="this.style.textDecoration='underline'"
+                                    onmouseout="this.style.textDecoration='none'">
+                                    samwafgo@gmail.com
+                                </a>
+                            </div>
+
+                            <!-- Issues 链接 -->
+                            <div style="padding: 12px; background: #f9fafb; border-radius: 6px;">
+                                <p style="margin: 0 0 10px 0; font-size: 13px; color: #333; font-weight: 500;">提交问题反馈
+                                </p>
+                                <div
+                                    style="display: flex; flex-direction: row; gap: 8px; justify-content: center; flex-wrap: wrap;">
+                                    <button class="repo-link"
+                                        onclick="openExternal('https://github.com/samwafgo/RemoteKnown/issues')"
+                                        style="flex: 1; min-width: 120px; padding: 6px 12px; font-size: 12px;">
+                                        📝 GitHub
+                                    </button>
+                                    <button class="repo-link"
+                                        onclick="openExternal('https://gitee.com/samwaf/remote-known/issues')"
+                                        style="flex: 1; min-width: 120px; padding: 6px 12px; font-size: 12px;">
+                                        📝 Gitee
+                                    </button>
+                                    <button class="repo-link"
+                                        onclick="openExternal('https://atomgit.com/SamWaf/RemoteKnown/issues')"
+                                        style="flex: 1; min-width: 120px; padding: 6px 12px; font-size: 12px;">
+                                        📝 AtomGit
+                                    </button>
+                                </div>
+                                <p style="margin: 10px 0 0 0; font-size: 11px; color: #666;">欢迎提交 Bug 报告、功能建议或使用反馈</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 关于 Tab -->
+                    <div id="tab-about" class="tab-pane">
+                        <div class="about-info">
+                            <img src="assets/logo.png" alt="Logo">
+                            <h4>远程知道了</h4>
+                            <p>RemoteKnown</p>
+                            <p style="margin-top: 16px;">
+                                版本: <span id="appVersion">1.0.0</span>
+                                <span id="updateBadge"
+                                    style="display:none; background: #ef4444; color: white; padding: 2px 6px; border-radius: 99px; font-size: 10px; vertical-align: middle;">New</span>
+                            </p>
+
+                            <div id="updateSection" style="margin: 10px 0; min-height: 24px;">
+                                <a href="javascript:void(0)" onclick="checkUpdate()" id="checkUpdateLink"
+                                    style="color: #3b82f6; text-decoration: none; font-size: 13px;">检查更新</a>
+                                <div id="updateInfo"
+                                    style="display:none; margin-top: 8px; background: #fef2f2; padding: 10px; border-radius: 4px; border: 1px solid #fee2e2;">
+                                    <p style="color: #991b1b; font-weight: bold; margin: 0 0 4px 0;">发现新版本: <span
+                                            id="newVersion"></span></p>
+                                    <button class="btn btn-primary" onclick="openDownloadLink()"
+                                        style="font-size: 12px; padding: 4px 12px; margin-top: 4px;">前往下载</button>
+                                </div>
+                            </div>
+
+                            <p>保护您的隐私安全，防止未经授权的远程控制。</p>
+
+                            <div class="repo-links">
+                                <button class="repo-link"
+                                    onclick="openExternal('https://github.com/samwafgo/RemoteKnown')">
+                                    GitHub
+                                </button>
+                                <button class="repo-link"
+                                    onclick="openExternal('https://gitee.com/samwaf/remote-known')">
+                                    Gitee
+                                </button>
+                                <button class="repo-link"
+                                    onclick="openExternal('https://atomgit.com/SamWaf/RemoteKnown')">
+                                    AtomGit
+                                </button>
+                            </div>
+
+                            <div class="copyright">
+                                <p>© 2025 RemoteKnown Team. All rights reserved.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+
+        <!-- 当前状态 -->
+        <div id="statusBar" class="status-bar">
+            <div id="statusDot" class="dot safe"></div>
+            <div id="statusText" class="status-text">当前状态：未检测到远程控制</div>
+            <div class="meta">
+                开始：<span id="startTime">-</span> |
+                已持续：<span id="duration">-</span>
+            </div>
+            <div class="status-actions">
+                <button class="action-link" onclick="openSettingsModal('feedback')">💬 反馈交流</button>
+                <button class="action-link" onclick="openSettingsModal('notification')">🔔 通知设置</button>
+            </div>
+        </div>
+
+        <!-- 判定依据 -->
+        <div class="card" style="margin-top:20px;">
+            <h3>本次远程判定依据</h3>
+            <div id="signals"></div>
+        </div>
+
+        <!-- 审计历史 -->
+        <div class="card" style="margin-top:20px;">
+            <h3>
+                <span>远程会话审计记录</span>
+                <button class="refresh-btn" id="refreshHistoryBtn" onclick="loadHistory()" title="刷新历史记录">
+                    <span>🔄</span>
+                </button>
+            </h3>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>开始时间</th>
+                            <th>结束时间</th>
+                            <th>持续时长</th>
+                            <th>判定依据</th>
+                        </tr>
+                    </thead>
+                    <tbody id="history">
+                        <tr>
+                            <td colspan="4" style="text-align: center; color: #999;">加载中...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="pagination" id="pagination" style="display: none;">
+                <button class="pagination-btn" id="prevBtn" onclick="changePage(currentPage - 1)">上一页</button>
+                <span class="pagination-info" id="pageInfo">第 1 页，共 1 页</span>
+                <button class="pagination-btn" id="nextBtn" onclick="changePage(currentPage + 1)">下一页</button>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        let lastRemoteActive = null;
+        let currentPage = 1;
+        const pageSize = 5;
+        let totalPages = 1;
+
+        function render(data) {
+            const active = data.remote_active;
+
+            // 检测状态变化，如果变化则重新加载历史记录
+            if (lastRemoteActive !== null && lastRemoteActive !== active) {
+                currentPage = 1; // 重置到第一页
+                loadHistory();
+            }
+            lastRemoteActive = active;
+
+            statusDot.className = 'dot ' + (active ? 'remote' : 'safe');
+            statusText.innerText = active
+                ? '当前状态：远程控制进行中'
+                : '当前状态：未检测到远程控制';
+
+            const metaDiv = document.querySelector('.meta');
+            if (active) {
+                metaDiv.style.display = 'block';
+                // 移除 margin-left: auto，因为现在有专门的样式控制
+                document.querySelector('.status-actions').style.marginLeft = '0';
+
+                startTime.innerText = data.start_time ? new Date(data.start_time).toLocaleString('zh-CN') : '未知';
+                duration.innerText = data.duration || '计算中...';
+            } else {
+                metaDiv.style.display = 'none';
+                document.querySelector('.status-actions').style.marginLeft = 'auto';
+            }
+
+            const signals = data.signals || [];
+            const signalsDiv = document.getElementById('signals');
+            signalsDiv.innerHTML = '';
+            signals.forEach(s => {
+                const el = document.createElement('span');
+                el.className = 'signal bad';
+                el.innerText = s.name || s.Name || JSON.stringify(s);
+                signalsDiv.appendChild(el);
+            });
+        }
+
+        // IPC 接入
+        if (window.remoteAudit) {
+            window.remoteAudit.onStatusUpdate(render);
+        }
+
+        async function loadHistory(page = currentPage) {
+            const refreshBtn = document.getElementById('refreshHistoryBtn');
+            const iconSpan = refreshBtn ? refreshBtn.querySelector('span') : null;
+
+            if (refreshBtn) {
+                refreshBtn.disabled = true;
+                if (iconSpan) {
+                    iconSpan.style.display = 'inline-block';
+                    iconSpan.style.transition = 'transform 0.5s linear';
+                    iconSpan.style.transform = 'rotate(360deg)';
+                }
+            }
+
+            if (window.remoteAudit) {
+                try {
+                    // 调用带分页参数的API
+                    const response = await window.remoteAudit.getHistoryPaginated(page, pageSize);
+
+                    // 兼容旧格式（如果是数组）和新格式（如果是对象）
+                    let history = [];
+                    let total = 0;
+
+                    if (Array.isArray(response)) {
+                        // 旧格式：直接返回数组
+                        history = response;
+                        total = response.length;
+                        totalPages = 1;
+                    } else if (response && response.sessions) {
+                        // 新格式：分页响应
+                        history = response.sessions || [];
+                        total = response.total || 0;
+                        totalPages = response.totalPages || 1;
+                        currentPage = response.page || page;
+                    }
+
+                    renderHistory(history);
+                    updatePagination(total, currentPage, totalPages);
+                } catch (error) {
+                    console.error('加载历史记录失败:', error);
+                    renderHistory([]);
+                    updatePagination(0, 1, 1);
+                }
+            }
+
+            if (refreshBtn) {
+                setTimeout(() => {
+                    refreshBtn.disabled = false;
+                    if (iconSpan) {
+                        iconSpan.style.transform = 'rotate(0deg)';
+                        iconSpan.style.transition = 'none';
+                    }
+                }, 500); // 至少旋转0.5秒以免闪烁
+            }
+        }
+
+        function changePage(page) {
+            if (page < 1 || page > totalPages) {
+                return;
+            }
+            currentPage = page;
+            loadHistory(page);
+        }
+
+        function updatePagination(total, page, totalPages) {
+            const pagination = document.getElementById('pagination');
+            const pageInfo = document.getElementById('pageInfo');
+            const prevBtn = document.getElementById('prevBtn');
+            const nextBtn = document.getElementById('nextBtn');
+
+            if (totalPages <= 1) {
+                pagination.style.display = 'none';
+                return;
+            }
+
+            pagination.style.display = 'flex';
+            pageInfo.textContent = `第 ${page} 页，共 ${totalPages} 页（共 ${total} 条）`;
+
+            prevBtn.disabled = page <= 1;
+            nextBtn.disabled = page >= totalPages;
+        }
+
+        function renderHistory(history) {
+            const tbody = document.getElementById('history');
+            tbody.innerHTML = '';
+
+            if (!history || history.length === 0) {
+                const row = document.createElement('tr');
+                row.innerHTML = '<td colspan="4" style="text-align: center; color: #999;">暂无审计记录</td>';
+                tbody.appendChild(row);
+                return;
+            }
+
+            history.forEach(session => {
+                const row = document.createElement('tr');
+                // 处理 end_time：可能是 null、undefined 或空字符串
+                let endTime = '-';
+                if (session.end_time) {
+                    try {
+                        endTime = new Date(session.end_time).toLocaleString('zh-CN');
+                    } catch (e) {
+                        endTime = '-';
+                    }
+                }
+
+                // 处理 duration：确保是数字（秒数）
+                let duration = '-';
+                if (session.duration !== null && session.duration !== undefined) {
+                    const durationSeconds = typeof session.duration === 'number' ? session.duration : parseInt(session.duration);
+                    if (!isNaN(durationSeconds) && durationSeconds >= 0) {
+                        duration = formatDuration(durationSeconds);
+                    }
+                }
+
+                row.innerHTML = `
+            <td>${session.start_time ? new Date(session.start_time).toLocaleString('zh-CN') : '-'}</td>
+            <td>${endTime}</td>
+            <td>${duration}</td>
+            <td>${formatSignals(session.signals)}</td>
+        `;
+                tbody.appendChild(row);
+            });
+        }
+
+        function formatDuration(seconds) {
+            const h = Math.floor(seconds / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            const s = seconds % 60;
+            return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+        }
+
+        function formatSignals(signalsStr) {
+            if (!signalsStr) return '-';
+            return signalsStr.split(',').map(s => `<span class="signal bad">${s.trim()}</span>`).join('');
+        }
+
+        loadHistory();
+
+        // 系统设置相关函数
+        function switchTab(tabName) {
+            // 更新 Tab按钮状态
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            event.target.classList.add('active');
+
+            // 更新 Content 显隐
+            document.querySelectorAll('.tab-pane').forEach(pane => {
+                pane.classList.remove('active');
+                pane.style.display = 'none';
+            });
+            const activePane = document.getElementById('tab-' + tabName);
+            activePane.classList.add('active');
+            activePane.style.display = 'block';
+        }
+
+        function openSettingsModal(tabName = 'notification') {
+            const modal = document.getElementById('settingsModal');
+            modal.style.display = 'block';
+
+            // 重置状态
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.tab-pane').forEach(p => { p.classList.remove('active'); p.style.display = 'none'; });
+
+            // 激活指定的 Tab
+            // 注意：这里需要精确匹配 onclick 中的参数
+            const targetBtn = document.querySelector(`button[onclick="switchTab('${tabName}')"]`);
+            if (targetBtn) targetBtn.classList.add('active');
+
+            const targetPane = document.getElementById('tab-' + tabName);
+            if (targetPane) {
+                targetPane.style.display = 'block';
+                targetPane.classList.add('active');
+            }
+
+            // 如果是通知 Tab，加载配置
+            if (tabName === 'notification') {
+                const testResult = document.getElementById('testResult');
+                if (testResult) {
+                    testResult.style.display = 'none';
+                    testResult.textContent = '';
+                }
+                loadNotificationConfig();
+            }
+        }
+
+        function closeSettingsModal() {
+            const modal = document.getElementById('settingsModal');
+            modal.style.display = 'none';
+        }
+
+        // 点击模态框外部关闭
+        window.onclick = function (event) {
+            const modal = document.getElementById('settingsModal');
+            if (event.target == modal) {
+                closeSettingsModal();
+            }
+        }
+
+        // 打开外部链接
+        function openExternal(url) {
+            if (window.remoteAudit && window.remoteAudit.openExternal) {
+                window.remoteAudit.openExternal(url);
+            } else {
+                window.open(url, '_blank');
+            }
+        }
+
+        // 版本更新相关
+        let latestDownloadUrl = '';
+
+        async function initVersion() {
+            if (window.remoteAudit) {
+                const version = await window.remoteAudit.getAppVersion();
+                document.getElementById('appVersion').innerText = version;
+            }
+        }
+
+        // 语义化版本比较函数
+        function compareVersions(v1, v2) {
+            // 移除前缀 v
+            v1 = v1.replace(/^v/, '');
+            v2 = v2.replace(/^v/, '');
+
+            // 分割版本号
+            const parts1 = v1.split('.').map(n => parseInt(n) || 0);
+            const parts2 = v2.split('.').map(n => parseInt(n) || 0);
+
+            // 补齐长度
+            const maxLen = Math.max(parts1.length, parts2.length);
+            while (parts1.length < maxLen) parts1.push(0);
+            while (parts2.length < maxLen) parts2.push(0);
+
+            // 逐段比较
+            for (let i = 0; i < maxLen; i++) {
+                if (parts1[i] > parts2[i]) return 1;   // v1 > v2
+                if (parts1[i] < parts2[i]) return -1;  // v1 < v2
+            }
+            return 0; // v1 == v2
+        }
+
+        async function checkUpdate() {
+            const link = document.getElementById('checkUpdateLink');
+            const info = document.getElementById('updateInfo');
+            const badge = document.getElementById('updateBadge');
+
+            link.innerText = '正在检查...';
+            link.style.pointerEvents = 'none';
+            info.style.display = 'none';
+
+            try {
+                if (window.remoteAudit) {
+                    const result = await window.remoteAudit.checkForUpdates();
+                    const currentVersion = document.getElementById('appVersion').innerText;
+
+                    if (result && result.tag_name) {
+                        const latestVer = result.tag_name;
+                        
+                        // 使用语义化版本比较
+                        const comparison = compareVersions(latestVer, currentVersion);
+                        
+                        if (comparison > 0) {
+                            // 有新版本
+                            document.getElementById('newVersion').innerText = result.tag_name;
+                            info.style.display = 'block';
+                            badge.style.display = 'inline-block';
+                            latestDownloadUrl = result.html_url;
+                            link.innerText = '发现新版本';
+                        } else {
+                            link.innerText = '当前已是最新版本';
+                            setTimeout(() => { link.innerText = '检查更新'; }, 2000);
+                        }
+                    } else {
+                        link.innerText = '暂无更新';
+                        setTimeout(() => { link.innerText = '检查更新'; }, 2000);
+                    }
+                }
+            } catch (e) {
+                console.error(e);
+                link.innerText = '检查失败';
+                setTimeout(() => { link.innerText = '检查更新'; }, 2000);
+            } finally {
+                link.style.pointerEvents = 'auto';
+            }
+        }
+
+        function openDownloadLink() {
+            if (latestDownloadUrl) {
+                openExternal(latestDownloadUrl);
+            }
+        }
+
+        // 初始化
+        initVersion();
+
+        // 缓存不同类型的通知配置
+        let notificationConfigs = {
+            feishu: { webhook_url: '', secret: '' },
+            dingtalk: { webhook_url: '', secret: '' }
+        };
+        let currentNotificationType = 'feishu';
+
+        // 通知类型改变时显示/隐藏签名密钥字段，并切换配置
+        document.getElementById('notificationType').addEventListener('change', function () {
+            // 保存切换前的类型的配置到缓存（使用旧的 currentNotificationType）
+            notificationConfigs[currentNotificationType] = {
+                webhook_url: document.getElementById('webhookURL').value.trim(),
+                secret: document.getElementById('webhookSecret').value.trim()
+            };
+            
+            // 切换到新类型
+            currentNotificationType = this.value;
+            
+            // 加载新类型的配置
+            loadTypeFromCache(currentNotificationType);
+            
+            // 显示/隐藏签名密钥字段
+            const secretGroup = document.getElementById('secretGroup');
+            if (this.value === 'dingtalk') {
+                secretGroup.style.display = 'block';
+            } else {
+                secretGroup.style.display = 'none';
+            }
+        });
+
+        // 保存当前表单数据到缓存
+        function saveCurrentTypeToCache() {
+            const type = document.getElementById('notificationType').value;
+            notificationConfigs[type] = {
+                webhook_url: document.getElementById('webhookURL').value.trim(),
+                secret: document.getElementById('webhookSecret').value.trim()
+            };
+        }
+
+        // 从缓存加载指定类型的配置到表单
+        function loadTypeFromCache(type) {
+            const config = notificationConfigs[type];
+            document.getElementById('webhookURL').value = config.webhook_url || '';
+            document.getElementById('webhookSecret').value = config.secret || '';
+        }
+
+        async function loadNotificationConfig() {
+            if (!window.remoteAudit) return;
+
+            try {
+                const config = await window.remoteAudit.getNotificationConfig();
+                if (config) {
+                    // 加载基本配置
+                    document.getElementById('notificationEnabled').checked = config.enabled || false;
+                    currentNotificationType = config.type || 'feishu';
+                    document.getElementById('notificationType').value = currentNotificationType;
+                    
+                    // 加载所有类型的配置到缓存
+                    if (config.feishu) {
+                        notificationConfigs.feishu = {
+                            webhook_url: config.feishu.webhook_url || '',
+                            secret: config.feishu.secret || ''
+                        };
+                    }
+                    if (config.dingtalk) {
+                        notificationConfigs.dingtalk = {
+                            webhook_url: config.dingtalk.webhook_url || '',
+                            secret: config.dingtalk.secret || ''
+                        };
+                    }
+                    
+                    // 显示当前类型的配置
+                    loadTypeFromCache(currentNotificationType);
+
+                    // 根据类型显示/隐藏签名密钥字段
+                    const secretGroup = document.getElementById('secretGroup');
+                    if (currentNotificationType === 'dingtalk') {
+                        secretGroup.style.display = 'block';
+                    } else {
+                        secretGroup.style.display = 'none';
+                    }
+                }
+            } catch (error) {
+                console.error('加载通知配置失败:', error);
+            }
+        }
+
+        async function testNotification() {
+            if (!window.remoteAudit) return;
+
+            const testBtn = document.getElementById('testBtn');
+            const testResult = document.getElementById('testResult');
+
+            // 获取当前表单配置
+            const config = {
+                type: document.getElementById('notificationType').value,
+                webhook_url: document.getElementById('webhookURL').value.trim(),
+                secret: document.getElementById('webhookSecret').value.trim()
+            };
+
+            // 验证
+            if (!config.webhook_url) {
+                testResult.style.display = 'block';
+                testResult.className = 'test-result error';
+                testResult.textContent = '请先填写Webhook URL';
+                return;
+            }
+
+            // 显示测试中状态
+            testBtn.disabled = true;
+            testBtn.textContent = '测试中...';
+            testResult.style.display = 'block';
+            testResult.className = 'test-result info';
+            testResult.textContent = '正在发送测试通知...';
+
+            try {
+                const result = await window.remoteAudit.testNotification(config);
+                if (result && result.success) {
+                    testResult.className = 'test-result success';
+                    testResult.textContent = '✓ 测试通知发送成功！请检查您的飞书/钉钉是否收到消息。';
+                } else {
+                    testResult.className = 'test-result error';
+                    testResult.textContent = '✗ 测试失败: ' + (result?.error || '未知错误');
+                }
+            } catch (error) {
+                testResult.className = 'test-result error';
+                testResult.textContent = '✗ 测试失败: ' + (error.message || '网络错误');
+            } finally {
+                testBtn.disabled = false;
+                testBtn.textContent = '测试通知';
+            }
+        }
+
+        async function saveNotificationConfig() {
+            if (!window.remoteAudit) return;
+
+            const config = {
+                enabled: document.getElementById('notificationEnabled').checked,
+                type: document.getElementById('notificationType').value,
+                webhook_url: document.getElementById('webhookURL').value.trim(),
+                secret: document.getElementById('webhookSecret').value.trim()
+            };
+
+            // 验证
+            if (config.enabled && !config.webhook_url) {
+                alert('请填写Webhook URL');
+                return;
+            }
+
+            try {
+                const result = await window.remoteAudit.saveNotificationConfig(config);
+                // 检查返回结果
+                if (result && (result.status === 'success' || result.success)) {
+                    alert('保存成功');
+                    closeSettingsModal();
+                } else {
+                    // 如果返回了结果但没有成功标识，也认为保存成功（兼容性处理）
+                    if (result !== null && result !== undefined) {
+                        alert('保存成功');
+                        closeSettingsModal();
+                    } else {
+                        throw new Error('保存失败：服务器未返回有效响应');
+                    }
+                }
+            } catch (error) {
+                console.error('保存通知配置失败:', error);
+                alert('保存失败: ' + (error.message || '未知错误'));
+            }
+        }
+    </script>
+
+</body>
+
+</html>

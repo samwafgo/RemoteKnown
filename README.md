@@ -72,9 +72,9 @@
 ### 下载安装
 请从以下任一平台下载最新的安装包 (`RemoteKnown-Setup-x.x.x.exe`) 并安装：
 
-*   **GitHub**: [Releases 页面](https://github.com/samwafgo/RemoteKnown/releases)
-*   **Gitee**: [Releases 页面](https://gitee.com/samwaf/remote-known/releases)
-*   **AtomGit**: [Releases 页面](https://atomgit.com/SamWaf/RemoteKnown/releases)
+*   **GitHub**: [GitHub Releases 页面](https://github.com/samwafgo/RemoteKnown/releases)
+*   **Gitee**: [Gitee Releases 页面](https://gitee.com/samwaf/remote-known/releases)
+*   **AtomGit**: [AtomGit Releases 页面](https://atomgit.com/SamSafe/RemoteKnown/releases)
 
 ### 运行
 安装完成后，双击桌面图标启动。
@@ -132,7 +132,7 @@ RemoteKnown/
 ### 代码仓库
 *   **GitHub**: [https://github.com/samwafgo/RemoteKnown](https://github.com/samwafgo/RemoteKnown)
 *   **Gitee**: [https://gitee.com/samwaf/remote-known](https://gitee.com/samwaf/remote-known)
-*   **AtomGit**: [https://atomgit.com/SamWaf/RemoteKnown](https://atomgit.com/SamSafe/RemoteKnown)
+*   **AtomGit**: [https://atomgit.com/SamSafe/RemoteKnown](https://atomgit.com/SamSafe/RemoteKnown)
 
 ### 交流沟通
 欢迎关注我们的微信公众号，获取最新动态和技术交流：

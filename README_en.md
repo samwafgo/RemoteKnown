@@ -74,7 +74,7 @@ Download the latest installer (`RemoteKnown-Setup-x.x.x.exe`) from any of the fo
 
 *   **GitHub**: [Releases page](https://github.com/samwafgo/RemoteKnown/releases)
 *   **Gitee**: [Releases page](https://gitee.com/samwaf/remote-known/releases)
-*   **AtomGit**: [Releases page](https://atomgit.com/SamWaf/SamSafe/releases)
+*   **AtomGit**: [Releases page](https://atomgit.com/SamSafe/RemoteKnown/releases)
 
 ### Run
 After installation, double-click the desktop icon to start.
@@ -133,7 +133,7 @@ Issues and Pull Requests are welcome!
 ### Repositories
 *   **GitHub**: [https://github.com/samwafgo/RemoteKnown](https://github.com/samwafgo/RemoteKnown)
 *   **Gitee**: [https://gitee.com/samwaf/remote-known](https://gitee.com/samwaf/remote-known)
-*   **AtomGit**: [https://atomgit.com/SamWaf/RemoteKnown](https://atomgit.com/SamWaf/RemoteKnown)
+*   **AtomGit**: [https://atomgit.com/SamSafe/RemoteKnown](https://atomgit.com/SamSafe/RemoteKnown)
 
 ### Communication
 Follow our WeChat Official Account for the latest updates and technical discussions:

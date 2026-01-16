@@ -1,6 +1,6 @@
 {
   "name": "RemoteKnown",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "远程控制感知与审计工具",
   "main": "main.js",
   "repository": {

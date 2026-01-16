@@ -132,7 +132,7 @@ RemoteKnown/
 ### 代码仓库
 *   **GitHub**: [https://github.com/samwafgo/RemoteKnown](https://github.com/samwafgo/RemoteKnown)
 *   **Gitee**: [https://gitee.com/samwaf/remote-known](https://gitee.com/samwaf/remote-known)
-*   **AtomGit**: [https://atomgit.com/SamWaf/RemoteKnown](https://atomgit.com/SamWaf/RemoteKnown)
+*   **AtomGit**: [https://atomgit.com/SamWaf/RemoteKnown](https://atomgit.com/SamSafe/RemoteKnown)
 
 ### 交流沟通
 欢迎关注我们的微信公众号，获取最新动态和技术交流：

@@ -36,7 +36,45 @@
 
         .header-right {
             display: flex;
+            align-items: center;
             -webkit-app-region: no-drag;
+        }
+
+        .update-notification {
+            display: none;
+            align-items: center;
+            gap: 6px;
+            margin-right: 12px;
+            padding: 4px 10px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 16px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        .update-notification:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        .update-notification-icon {
+            font-size: 14px;
+        }
+
+        .update-notification-text {
+            color: #fff;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        @keyframes pulse {
+            0%, 100% {
+                box-shadow: 0 0 0 0 rgba(102, 126, 234, 0.7);
+            }
+            50% {
+                box-shadow: 0 0 0 6px rgba(102, 126, 234, 0);
+            }
         }
 
         .window-btn {
@@ -588,6 +626,10 @@
             <span>远程知道了 · 本机远程控制行为审计</span>
         </div>
         <div class="header-right">
+            <div class="update-notification" id="headerUpdateNotification" onclick="showUpdateDetails()" title="发现新版本，点击查看详情">
+                <span class="update-notification-icon">🎉</span>
+                <span class="update-notification-text">新版本可用</span>
+            </div>
             <button class="settings-btn" onclick="openSettingsModal()" title="系统设置">⚙️</button>
             <button class="window-btn" onclick="window.remoteAudit.minimize()">─</button>
             <button class="window-btn" onclick="window.remoteAudit.maximize()">□</button>
@@ -694,7 +736,7 @@
                                         📝 Gitee
                                     </button>
                                     <button class="repo-link"
-                                        onclick="openExternal('https://atomgit.com/SamWaf/RemoteKnown/issues')"
+                                        onclick="openExternal('https://atomgit.com/SamSafe/RemoteKnown/issues')"
                                         style="flex: 1; min-width: 120px; padding: 6px 12px; font-size: 12px;">
                                         📝 AtomGit
                                     </button>
@@ -740,7 +782,7 @@
                                     Gitee
                                 </button>
                                 <button class="repo-link"
-                                    onclick="openExternal('https://atomgit.com/SamWaf/RemoteKnown')">
+                                    onclick="openExternal('https://atomgit.com/SamSafe/RemoteKnown')">
                                     AtomGit
                                 </button>
                             </div>
@@ -1076,6 +1118,53 @@
             if (window.remoteAudit) {
                 const version = await window.remoteAudit.getAppVersion();
                 document.getElementById('appVersion').innerText = version;
+                // 初始化后自动静默检查更新
+                checkUpdateSilently();
+            }
+        }
+
+        // 静默检查更新（不显示加载状态）
+        async function checkUpdateSilently() {
+            try {
+                if (window.remoteAudit) {
+                    const result = await window.remoteAudit.checkForUpdates();
+                    const currentVersion = document.getElementById('appVersion').innerText;
+
+                    if (result && result.tag_name) {
+                        const latestVer = result.tag_name;
+                        const comparison = compareVersions(latestVer, currentVersion);
+                        
+                        if (comparison > 0) {
+                            // 有新版本，显示header通知
+                            const headerNotification = document.getElementById('headerUpdateNotification');
+                            headerNotification.style.display = 'flex';
+                            
+                            // 保存版本信息供后续使用
+                            window.latestVersionInfo = {
+                                version: result.tag_name,
+                                url: result.html_url
+                            };
+                            
+                            // 同时更新设置页面的信息
+                            document.getElementById('newVersion').innerText = result.tag_name;
+                            document.getElementById('updateBadge').style.display = 'inline-block';
+                            latestDownloadUrl = result.html_url;
+                        }
+                    }
+                }
+            } catch (e) {
+                console.error('静默检查更新失败:', e);
+                // 静默失败，不打扰用户
+            }
+        }
+
+        // 显示更新详情（点击header通知时）
+        function showUpdateDetails() {
+            if (window.latestVersionInfo) {
+                const message = `发现新版本: ${window.latestVersionInfo.version}\n\n是否前往下载页面？`;
+                if (confirm(message)) {
+                    openExternal(window.latestVersionInfo.url);
+                }
             }
         }
 
@@ -1106,6 +1195,7 @@
             const link = document.getElementById('checkUpdateLink');
             const info = document.getElementById('updateInfo');
             const badge = document.getElementById('updateBadge');
+            const headerNotification = document.getElementById('headerUpdateNotification');
 
             link.innerText = '正在检查...';
             link.style.pointerEvents = 'none';
@@ -1129,9 +1219,18 @@
                             badge.style.display = 'inline-block';
                             latestDownloadUrl = result.html_url;
                             link.innerText = '发现新版本';
+                            
+                            // 同时显示header通知
+                            headerNotification.style.display = 'flex';
+                            window.latestVersionInfo = {
+                                version: result.tag_name,
+                                url: result.html_url
+                            };
                         } else {
                             link.innerText = '当前已是最新版本';
                             setTimeout(() => { link.innerText = '检查更新'; }, 2000);
+                            // 隐藏header通知
+                            headerNotification.style.display = 'none';
                         }
                     } else {
                         link.innerText = '暂无更新';

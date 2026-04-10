@@ -1008,9 +1008,9 @@
                     }
                 }
 
-                // 处理 duration：确保是数字（秒数）
+                // 处理 duration：只有会话已结束（有 end_time）才显示时长
                 let duration = '-';
-                if (session.duration !== null && session.duration !== undefined) {
+                if (session.end_time && session.duration !== null && session.duration !== undefined) {
                     const durationSeconds = typeof session.duration === 'number' ? session.duration : parseInt(session.duration);
                     if (!isNaN(durationSeconds) && durationSeconds >= 0) {
                         duration = formatDuration(durationSeconds);

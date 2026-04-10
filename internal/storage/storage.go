@@ -133,7 +133,7 @@ func (s *Storage) UpdateSessionEnd(sessionID string, endTime time.Time, duration
 
 func (s *Storage) GetOpenSession() (*RemoteSession, error) {
 	var session RemoteSession
-	err := s.db.Where("end_time IS NULL").First(&session).Error
+	err := s.db.Where("end_time IS NULL").Order("start_time DESC").First(&session).Error
 	if err == gorm.ErrRecordNotFound {
 		return nil, nil
 	}

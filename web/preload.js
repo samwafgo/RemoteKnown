@@ -15,5 +15,7 @@ contextBridge.exposeInMainWorld('remoteAudit', {
     close: () => ipcRenderer.invoke('close'),
     openExternal: (url) => ipcRenderer.invoke('openExternal', url),
     getAppVersion: () => ipcRenderer.invoke('getAppVersion'),
-    checkForUpdates: () => ipcRenderer.invoke('checkForUpdates')
+    checkForUpdates: () => ipcRenderer.invoke('checkForUpdates'),
+    getStartupEnabled: () => ipcRenderer.invoke('getStartupEnabled'),
+    setStartupEnabled: (enabled) => ipcRenderer.invoke('setStartupEnabled', enabled)
 });

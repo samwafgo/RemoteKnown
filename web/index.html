@@ -649,6 +649,7 @@
                 <!-- 左侧导航 -->
                 <div class="settings-sidebar">
                     <button class="tab-btn active" onclick="switchTab('notification')">通知</button>
+                    <button class="tab-btn" onclick="switchTab('general')">通用</button>
                     <button class="tab-btn" onclick="switchTab('feedback')">反馈</button>
                     <button class="tab-btn" onclick="switchTab('about')">关于</button>
                 </div>
@@ -743,6 +744,17 @@
                                 </div>
                                 <p style="margin: 10px 0 0 0; font-size: 11px; color: #666;">欢迎提交 Bug 报告、功能建议或使用反馈</p>
                             </div>
+                        </div>
+                    </div>
+
+                    <!-- 通用 Tab -->
+                    <div id="tab-general" class="tab-pane">
+                        <div class="form-group">
+                            <div class="checkbox-group">
+                                <input type="checkbox" id="startupEnabled" name="startup_enabled">
+                                <label for="startupEnabled">开机自动启动</label>
+                            </div>
+                            <div class="help-text">系统启动时自动运行远程知道了，实时保护您的设备安全</div>
                         </div>
                     </div>
 
@@ -1087,12 +1099,27 @@
                 }
                 loadNotificationConfig();
             }
+
+            if (tabName === 'general') {
+                loadStartupConfig();
+            }
         }
 
         function closeSettingsModal() {
             const modal = document.getElementById('settingsModal');
             modal.style.display = 'none';
         }
+
+        async function loadStartupConfig() {
+            if (!window.remoteAudit) return;
+            const enabled = await window.remoteAudit.getStartupEnabled();
+            document.getElementById('startupEnabled').checked = enabled;
+        }
+
+        document.getElementById('startupEnabled').addEventListener('change', async function () {
+            if (!window.remoteAudit) return;
+            await window.remoteAudit.setStartupEnabled(this.checked);
+        });
 
         // 点击模态框外部关闭
         window.onclick = function (event) {

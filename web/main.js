@@ -34,6 +34,12 @@ if (!gotTheLock) {
 
     // 只有获取到锁的实例才执行初始化
     app.whenReady().then(() => {
+        const startupFlagFile = path.join(app.getPath('userData'), '.startup_initialized');
+        if (!fs.existsSync(startupFlagFile)) {
+            app.setLoginItemSettings({ openAtLogin: true });
+            fs.writeFileSync(startupFlagFile, '1');
+        }
+
         createWindow();
         createTray();
         startBackend();
@@ -519,6 +525,15 @@ function setupIPC() {
     ipcMain.handle('openExternal', async (event, url) => {
         const { shell } = require('electron');
         await shell.openExternal(url);
+    });
+
+    ipcMain.handle('getStartupEnabled', () => {
+        return app.getLoginItemSettings().openAtLogin;
+    });
+
+    ipcMain.handle('setStartupEnabled', (event, enabled) => {
+        app.setLoginItemSettings({ openAtLogin: enabled });
+        return { success: true };
     });
 
     ipcMain.handle('getAppVersion', () => {

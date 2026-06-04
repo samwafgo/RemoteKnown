@@ -1,5 +1,5 @@
 const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, Notification } = require('electron');
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const path = require('path');
 const http = require('http');
 const fs = require('fs');
@@ -9,6 +9,46 @@ const fs = require('fs');
 app.setAppUserModelId('com.remoteknown.app');
 
 const API_BASE = 'http://127.0.0.1:18080';
+
+const STARTUP_REG_KEY = 'HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run';
+const STARTUP_APP_NAME = 'RemoteKnown';
+
+function getStartupEnabled() {
+    try {
+        const result = spawnSync('reg', [
+            'query', STARTUP_REG_KEY, '/v', STARTUP_APP_NAME
+        ], { encoding: 'utf8', windowsHide: true });
+        return result.status === 0 && result.stdout.includes(STARTUP_APP_NAME);
+    } catch (e) {
+        return false;
+    }
+}
+
+function setStartupEnabled(enabled) {
+    try {
+        if (enabled) {
+            const exePath = app.getPath('exe');
+            const result = spawnSync('reg', [
+                'add', STARTUP_REG_KEY,
+                '/v', STARTUP_APP_NAME,
+                '/t', 'REG_SZ',
+                '/d', `"${exePath}"`,
+                '/f'
+            ], { encoding: 'utf8', windowsHide: true });
+            return result.status === 0;
+        } else {
+            const result = spawnSync('reg', [
+                'delete', STARTUP_REG_KEY,
+                '/v', STARTUP_APP_NAME,
+                '/f'
+            ], { encoding: 'utf8', windowsHide: true });
+            return result.status === 0;
+        }
+    } catch (e) {
+        console.error('[自启] 注册表操作失败:', e.message);
+        return false;
+    }
+}
 
 let mainWindow;
 let tray = null;
@@ -36,7 +76,7 @@ if (!gotTheLock) {
     app.whenReady().then(() => {
         const startupFlagFile = path.join(app.getPath('userData'), '.startup_initialized');
         if (!fs.existsSync(startupFlagFile)) {
-            app.setLoginItemSettings({ openAtLogin: true });
+            setStartupEnabled(true);
             fs.writeFileSync(startupFlagFile, '1');
         }
 
@@ -528,12 +568,12 @@ function setupIPC() {
     });
 
     ipcMain.handle('getStartupEnabled', () => {
-        return app.getLoginItemSettings().openAtLogin;
+        return getStartupEnabled();
     });
 
     ipcMain.handle('setStartupEnabled', (event, enabled) => {
-        app.setLoginItemSettings({ openAtLogin: enabled });
-        return { success: true };
+        const success = setStartupEnabled(enabled);
+        return { success };
     });
 
     ipcMain.handle('getDeviceName', async () => {

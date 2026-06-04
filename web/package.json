@@ -1,6 +1,6 @@
 {
   "name": "RemoteKnown",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "远程控制感知与审计工具",
   "main": "main.js",
   "repository": {
@@ -8,7 +8,7 @@
     "url": "https://github.com/samwafgo/RemoteKnown.git"
   },
   "scripts": {
-    "start": "electron .",
+    "start": "chcp 65001 && electron .",
     "build": "electron-builder",
     "build:win": "electron-builder --win",
     "build:mac": "electron-builder --mac"

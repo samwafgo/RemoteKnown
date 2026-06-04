@@ -9,16 +9,18 @@ import (
 	"unsafe"
 
 	uia "github.com/auuunya/go-element"
+	gopsutilnet "github.com/shirou/gopsutil/net"
 	"github.com/shirou/gopsutil/process"
 	"golang.org/x/sys/windows"
+	"golang.org/x/sys/windows/registry"
 )
 
 type WindowsDetector struct {
-	// 进程缓存，避免频繁查询
 	processCache     map[string][]*process.Process
 	processCacheTime time.Time
 	cacheMutex       sync.RWMutex
 	cacheDuration    time.Duration
+	rdpPort          uint32
 }
 
 var (
@@ -29,7 +31,26 @@ var (
 	procGetClassName             = user32.NewProc("GetClassNameW")
 	procGetWindowText            = user32.NewProc("GetWindowTextW")
 	procGetWindowTextLength      = user32.NewProc("GetWindowTextLengthW")
+
+	wtsapi32                 = windows.NewLazyDLL("wtsapi32.dll")
+	procWTSEnumerateSessions = wtsapi32.NewProc("WTSEnumerateSessionsW")
+	procWTSFreeMemory        = wtsapi32.NewProc("WTSFreeMemory")
+	procWTSQuerySessionInfo  = wtsapi32.NewProc("WTSQuerySessionInformationW")
 )
+
+const (
+	wtsActive             uint32 = 0  // WTS_CONNECTSTATE_CLASS
+	wtsClientName         uint32 = 10 // WTS_INFO_CLASS
+	wtsClientAddress      uint32 = 14 // WTS_INFO_CLASS
+	wtsClientProtocolType uint32 = 16 // WTS_INFO_CLASS; 0=Console, 2=RDP
+)
+
+// wtsSessionInfo 与 WTS_SESSION_INFOW 内存布局一致（x64: 24 bytes）
+type wtsSessionInfo struct {
+	SessionId      uint32
+	WinStationName uintptr // *uint16，DLL 分配，用 WTSFreeMemory 释放
+	State          uint32
+}
 
 // RemoteTool 定义远程工具配置
 type RemoteTool struct {
@@ -56,8 +77,25 @@ var remoteTools = []RemoteTool{
 func NewWindowsDetector() *WindowsDetector {
 	return &WindowsDetector{
 		processCache:  make(map[string][]*process.Process),
-		cacheDuration: 3 * time.Second, // 缓存3秒，减少重复查询
+		cacheDuration: 3 * time.Second,
+		rdpPort:       readRDPPort(),
 	}
+}
+
+// readRDPPort 从注册表读取 RDP 监听端口，读取失败时返回默认值 3389
+func readRDPPort() uint32 {
+	k, err := registry.OpenKey(registry.LOCAL_MACHINE,
+		`SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp`,
+		registry.QUERY_VALUE)
+	if err != nil {
+		return 3389
+	}
+	defer k.Close()
+	val, _, err := k.GetIntegerValue("PortNumber")
+	if err != nil {
+		return 3389
+	}
+	return uint32(val)
 }
 
 // findProcessesByName 通过进程名查找进程（优化版本，带缓存）
@@ -442,9 +480,171 @@ func (d *WindowsDetector) detectWindowClassByGoElement(pid int32, className stri
 	return found, nil
 }
 
-// DetectSessions 检测系统会话（占位符）
+// DetectSessions 检测活跃的 Windows RDP 会话
 func (d *WindowsDetector) DetectSessions() ([]Signal, error) {
-	return []Signal{}, nil
+	var pSessionInfo uintptr
+	var sessionCount uint32
+
+	r, _, err := procWTSEnumerateSessions.Call(
+		0, 0, 1,
+		uintptr(unsafe.Pointer(&pSessionInfo)),
+		uintptr(unsafe.Pointer(&sessionCount)),
+	)
+	if r == 0 {
+		return nil, fmt.Errorf("WTSEnumerateSessionsW: %w", err)
+	}
+	defer procWTSFreeMemory.Call(pSessionInfo)
+
+	var signals []Signal
+	infoSize := unsafe.Sizeof(wtsSessionInfo{})
+
+	for i := uint32(0); i < sessionCount; i++ {
+		info := (*wtsSessionInfo)(unsafe.Pointer(pSessionInfo + uintptr(i)*infoSize))
+
+		if info.State != wtsActive {
+			continue
+		}
+
+		stationName := ""
+		if info.WinStationName != 0 {
+			stationName = windows.UTF16PtrToString((*uint16)(unsafe.Pointer(info.WinStationName)))
+		}
+		if stationName == "Console" || stationName == "" {
+			continue
+		}
+
+		// 协议类型 2 = RDP，0 = Console
+		proto := d.wtsQueryUint16(info.SessionId, wtsClientProtocolType)
+		if proto != 2 {
+			continue
+		}
+
+		clientName := d.wtsQueryString(info.SessionId, wtsClientName)
+		if clientName == "" {
+			clientName = "未知客户端"
+		}
+		clientIP := d.wtsQueryClientIP(info.SessionId)
+
+		displayName := clientName
+		if clientIP != "" {
+			displayName = clientName + " " + clientIP
+		}
+
+		signals = append(signals, Signal{
+			Type:       "rdp_session",
+			Name:       fmt.Sprintf("Windows RDP (来自: %s)", displayName),
+			Confidence: 0.95,
+			Source:     fmt.Sprintf("会话ID:%d Station:%s", info.SessionId, stationName),
+			DetectedAt: time.Now(),
+		})
+	}
+
+	return signals, nil
+}
+
+// wtsQueryString 查询 WTS 字符串类型信息
+func (d *WindowsDetector) wtsQueryString(sessionId uint32, infoClass uint32) string {
+	var pBuf uintptr
+	var bytesReturned uint32
+	r, _, _ := procWTSQuerySessionInfo.Call(
+		0,
+		uintptr(sessionId),
+		uintptr(infoClass),
+		uintptr(unsafe.Pointer(&pBuf)),
+		uintptr(unsafe.Pointer(&bytesReturned)),
+	)
+	if r == 0 || pBuf == 0 {
+		return ""
+	}
+	defer procWTSFreeMemory.Call(pBuf)
+	return windows.UTF16PtrToString((*uint16)(unsafe.Pointer(pBuf)))
+}
+
+// wtsQueryUint16 查询 WTS uint16 类型信息（如协议类型）
+func (d *WindowsDetector) wtsQueryUint16(sessionId uint32, infoClass uint32) uint16 {
+	var pBuf uintptr
+	var bytesReturned uint32
+	r, _, _ := procWTSQuerySessionInfo.Call(
+		0,
+		uintptr(sessionId),
+		uintptr(infoClass),
+		uintptr(unsafe.Pointer(&pBuf)),
+		uintptr(unsafe.Pointer(&bytesReturned)),
+	)
+	if r == 0 || pBuf == 0 {
+		return 0
+	}
+	defer procWTSFreeMemory.Call(pBuf)
+	return *(*uint16)(unsafe.Pointer(pBuf))
+}
+
+// wtsQueryClientIP 查询 RDP 客户端 IP 地址；先走 WTS API，失败则回退到 TCP 连接扫描
+func (d *WindowsDetector) wtsQueryClientIP(sessionId uint32) string {
+	if ip := d.wtsIPFromAPI(sessionId); ip != "" {
+		return ip
+	}
+	return d.rdpIPFromTCP()
+}
+
+// wtsIPFromAPI 通过 WTSQuerySessionInformation 获取客户端 IP
+func (d *WindowsDetector) wtsIPFromAPI(sessionId uint32) string {
+	var pBuf uintptr
+	var bytesReturned uint32
+	r, _, _ := procWTSQuerySessionInfo.Call(
+		0,
+		uintptr(sessionId),
+		uintptr(wtsClientAddress),
+		uintptr(unsafe.Pointer(&pBuf)),
+		uintptr(unsafe.Pointer(&bytesReturned)),
+	)
+	if r == 0 || pBuf == 0 {
+		return ""
+	}
+	defer procWTSFreeMemory.Call(pBuf)
+
+	type wtsAddr struct {
+		Family  uint32
+		Address [20]byte
+	}
+	addr := (*wtsAddr)(unsafe.Pointer(pBuf))
+
+	switch addr.Family {
+	case 2: // AF_INET — IPv4 地址在 Address[2..5]
+		ip := fmt.Sprintf("%d.%d.%d.%d",
+			addr.Address[2], addr.Address[3],
+			addr.Address[4], addr.Address[5])
+		if ip == "0.0.0.0" {
+			// 部分驱动把地址放在 [0..3]
+			ip = fmt.Sprintf("%d.%d.%d.%d",
+				addr.Address[0], addr.Address[1],
+				addr.Address[2], addr.Address[3])
+		}
+		if ip == "0.0.0.0" {
+			return ""
+		}
+		return ip
+	case 23: // AF_INET6
+		return fmt.Sprintf("%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x",
+			addr.Address[0], addr.Address[1], addr.Address[2], addr.Address[3],
+			addr.Address[4], addr.Address[5], addr.Address[6], addr.Address[7],
+			addr.Address[8], addr.Address[9], addr.Address[10], addr.Address[11],
+			addr.Address[12], addr.Address[13], addr.Address[14], addr.Address[15])
+	}
+	return ""
+}
+
+// rdpIPFromTCP 从 TCP 连接中找本机 RDP 端口的 ESTABLISHED 对端 IP（兜底方案）
+func (d *WindowsDetector) rdpIPFromTCP() string {
+	conns, err := gopsutilnet.Connections("tcp")
+	if err != nil {
+		return ""
+	}
+	for _, conn := range conns {
+		if conn.Laddr.Port == d.rdpPort && conn.Status == "ESTABLISHED" && conn.Raddr.IP != "" {
+			return conn.Raddr.IP
+		}
+	}
+	return ""
 }
 
 // DetectRDPPorts 检测 RDP 端口（占位符）

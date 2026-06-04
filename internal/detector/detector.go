@@ -102,8 +102,7 @@ func (d *Detector) detect() {
 	d.stateMutex.Lock()
 	d.signals = allSignals
 
-	// 简化判断：只要检测到任何远程工具信号，就认为被远程控制
-	isRemote := len(remoteToolSignals) > 0
+	isRemote := len(remoteToolSignals) > 0 || len(sessionSignals) > 0
 
 	if isRemote != d.lastState {
 		d.lastChange = time.Now()

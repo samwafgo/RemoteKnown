@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -51,7 +52,8 @@ func (n *Notifier) NotifyRemoteStart(signals []detector.NotifierSignal) {
 	}
 
 	title := "⚠️ 远程控制检测告警"
-	content := fmt.Sprintf("检测到远程控制连接已建立\n\n检测信号：\n%s\n\n时间：%s",
+	content := fmt.Sprintf("主机：%s\n\n检测到远程控制连接已建立\n\n检测信号：\n%s\n\n时间：%s",
+		n.getDeviceName(),
 		strings.Join(signalNames, "\n"),
 		time.Now().Format("2006-01-02 15:04:05"))
 
@@ -76,7 +78,8 @@ func (n *Notifier) NotifyRemoteEnd(signals []detector.NotifierSignal) {
 	}
 
 	title := "✅ 远程控制已断开"
-	content := fmt.Sprintf("远程控制会话已结束\n\n上次检测信号：\n%s\n\n时间：%s",
+	content := fmt.Sprintf("主机：%s\n\n远程控制会话已结束\n\n上次检测信号：\n%s\n\n时间：%s",
+		n.getDeviceName(),
 		strings.Join(signalNames, "\n"),
 		time.Now().Format("2006-01-02 15:04:05"))
 
@@ -96,7 +99,8 @@ func (n *Notifier) NotifyAppExit() {
 	}
 
 	title := "🔴 RemoteKnown 服务已退出"
-	content := fmt.Sprintf("RemoteKnown 守护进程已停止运行\n\n时间：%s",
+	content := fmt.Sprintf("主机：%s\n\nRemoteKnown 守护进程已停止运行\n\n时间：%s",
+		n.getDeviceName(),
 		time.Now().Format("2006-01-02 15:04:05"))
 
 	if err := n.sendNotification(config, title, content); err != nil {
@@ -109,11 +113,24 @@ func (n *Notifier) NotifyAppExit() {
 // SendTestNotification 发送测试通知
 func (n *Notifier) SendTestNotification(config NotificationConfig) error {
 	title := "🧪 测试通知"
-	content := fmt.Sprintf("这是一条测试通知\n\n通知类型：%s\n发送时间：%s",
+	content := fmt.Sprintf("主机：%s\n\n这是一条测试通知\n\n通知类型：%s\n发送时间：%s",
+		n.getDeviceName(),
 		config.Type,
 		time.Now().Format("2006-01-02 15:04:05"))
 
 	return n.sendNotification(config, title, content)
+}
+
+// getDeviceName 获取设备标识名，优先用用户配置，未配置则返回主机名
+func (n *Notifier) getDeviceName() string {
+	name, err := n.storage.GetConfig("device_name")
+	if err == nil && name != "" {
+		return name
+	}
+	if hostname, err := os.Hostname(); err == nil {
+		return hostname
+	}
+	return "未知主机"
 }
 
 // getConfig 从存储中获取通知配置

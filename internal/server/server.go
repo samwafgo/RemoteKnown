@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"sync"
 	"time"
@@ -52,6 +53,7 @@ func (s *Server) Start() error {
 	http.HandleFunc("/api/notification", s.handleNotification)
 	http.HandleFunc("/api/notification/test", s.handleTestNotification)
 	http.HandleFunc("/api/notify", s.handleNotify)
+	http.HandleFunc("/api/device-name", s.handleDeviceName)
 	http.HandleFunc("/health", s.handleHealth)
 
 	s.running = true
@@ -434,6 +436,38 @@ type notifierSignal struct {
 
 func (n notifierSignal) GetName() string {
 	return n.name
+}
+
+func (s *Server) handleDeviceName(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	switch r.Method {
+	case http.MethodGet:
+		name, _ := s.storage.GetConfig("device_name")
+		hostname, _ := os.Hostname()
+		json.NewEncoder(w).Encode(map[string]string{
+			"name":     name,
+			"hostname": hostname,
+		})
+
+	case http.MethodPost:
+		var req struct {
+			Name string `json:"name"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid request body", http.StatusBadRequest)
+			return
+		}
+		if err := s.storage.SetConfig("device_name", req.Name); err != nil {
+			log.Printf("[设备名] 保存失败: %v", err)
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "error": "保存失败"})
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {

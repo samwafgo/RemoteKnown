@@ -750,6 +750,15 @@
                     <!-- 通用 Tab -->
                     <div id="tab-general" class="tab-pane">
                         <div class="form-group">
+                            <label for="deviceNameInput">设备名称</label>
+                            <div style="display: flex; gap: 8px; align-items: center;">
+                                <input type="text" id="deviceNameInput" placeholder="加载中…" style="flex: 1;">
+                                <button type="button" class="btn btn-primary" onclick="saveDeviceName()" style="white-space: nowrap;">保存</button>
+                            </div>
+                            <div class="help-text">用于区分多台主机的通知来源，默认使用主机名</div>
+                            <div id="deviceNameMsg" style="display:none; margin-top:6px; font-size:12px;"></div>
+                        </div>
+                        <div class="form-group">
                             <div class="checkbox-group">
                                 <input type="checkbox" id="startupEnabled" name="startup_enabled">
                                 <label for="startupEnabled">开机自动启动</label>
@@ -1069,6 +1078,14 @@
             const activePane = document.getElementById('tab-' + tabName);
             activePane.classList.add('active');
             activePane.style.display = 'block';
+
+            // 按需加载 Tab 数据
+            if (tabName === 'general') {
+                loadStartupConfig();
+                loadDeviceName();
+            } else if (tabName === 'notification') {
+                loadNotificationConfig();
+            }
         }
 
         function openSettingsModal(tabName = 'notification') {
@@ -1102,6 +1119,7 @@
 
             if (tabName === 'general') {
                 loadStartupConfig();
+                loadDeviceName();
             }
         }
 
@@ -1114,6 +1132,35 @@
             if (!window.remoteAudit) return;
             const enabled = await window.remoteAudit.getStartupEnabled();
             document.getElementById('startupEnabled').checked = enabled;
+        }
+
+        async function loadDeviceName() {
+            if (!window.remoteAudit) return;
+            const input = document.getElementById('deviceNameInput');
+            try {
+                const data = await window.remoteAudit.getDeviceName();
+                input.value = data.name || '';
+                input.placeholder = data.hostname || '请输入设备名称';
+            } catch (e) {
+                input.placeholder = '请输入设备名称';
+            }
+        }
+
+        async function saveDeviceName() {
+            if (!window.remoteAudit) return;
+            const name = document.getElementById('deviceNameInput').value.trim();
+            const msg = document.getElementById('deviceNameMsg');
+            try {
+                await window.remoteAudit.saveDeviceName(name);
+                msg.textContent = '保存成功';
+                msg.style.color = '#16a34a';
+                msg.style.display = 'block';
+                setTimeout(() => { msg.style.display = 'none'; }, 2000);
+            } catch (e) {
+                msg.textContent = '保存失败：' + e.message;
+                msg.style.color = '#dc2626';
+                msg.style.display = 'block';
+            }
         }
 
         document.getElementById('startupEnabled').addEventListener('change', async function () {

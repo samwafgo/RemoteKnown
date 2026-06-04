@@ -536,6 +536,14 @@ function setupIPC() {
         return { success: true };
     });
 
+    ipcMain.handle('getDeviceName', async () => {
+        return await fetchAPI('/api/device-name');
+    });
+
+    ipcMain.handle('saveDeviceName', async (event, name) => {
+        return await fetchAPIPost('/api/device-name', { name });
+    });
+
     ipcMain.handle('getAppVersion', () => {
         return app.getVersion();
     });

@@ -18,6 +18,8 @@ import (
 	"RemoteKnown/internal/storage"
 )
 
+var debugMode = os.Getenv("REMOTEKNOWN_DEBUG") != ""
+
 // NotificationConfig 通知配置
 type NotificationConfig struct {
 	Enabled    bool   `json:"enabled"`
@@ -248,6 +250,11 @@ func (n *Notifier) sendFeishuNotification(config NotificationConfig, title, cont
 		message["sign"] = sign
 	}
 
+	if debugMode {
+		if raw, err := json.Marshal(message); err == nil {
+			log.Printf("[通知器] 飞书消息原始内容: %s", string(raw))
+		}
+	}
 	return n.postWebhook(config.WebhookURL, message)
 }
 

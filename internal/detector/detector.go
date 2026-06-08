@@ -4,10 +4,13 @@ import (
 	"RemoteKnown/internal/storage"
 	"fmt"
 	"log"
+	"os"
 	"strings"
 	"sync"
 	"time"
 )
+
+var debugMode = os.Getenv("REMOTEKNOWN_DEBUG") != ""
 
 type Signal struct {
 	Type       string    `json:"type"`
@@ -117,7 +120,9 @@ func (d *Detector) detect() {
 
 	d.stateMutex.Unlock()
 
-	log.Printf("检测结果: 远程=%v, 信号数=%d", isRemote, len(allSignals))
+	if debugMode {
+		log.Printf("检测结果: 远程=%v, 信号数=%d", isRemote, len(allSignals))
+	}
 }
 
 func (d *Detector) handleRemoteStart(signals []Signal) {

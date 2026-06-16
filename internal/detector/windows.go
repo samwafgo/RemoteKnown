@@ -54,24 +54,29 @@ type wtsSessionInfo struct {
 
 // RemoteTool 定义远程工具配置
 type RemoteTool struct {
-	ProcessName        string   // 进程名（可为空，表示不检查进程名）
-	WindowClass        string   // 窗口类名（用于检测远程状态）
-	WindowTitle        string   // 窗口标题（用于检测远程状态，支持部分匹配）
-	CommandLineArgs    []string // 命令行参数特征（用于检测远程状态）
-	ToolName           string   // 工具显示名称
-	TCPConnThreshold   int      // TCP连接数阈值（大于等于此值认为被远程，0表示不检测）
-	UDPConnThreshold   int      // UDP连接数阈值（大于此值认为被远程，0表示不检测）
-	UseEstablishedOnly bool     // 是否只统计ESTABLISHED状态的连接（仅对TCP有效）
+	ProcessName             string   // 进程名（可为空，表示不检查进程名）
+	WindowClass             string   // 窗口类名（用于检测远程状态）
+	WindowTitle             string   // 窗口标题（用于检测远程状态，支持部分匹配）
+	CommandLineArgs         []string // 命令行参数特征（用于检测远程状态）
+	DetectChildProcess      bool     // 是否检测"会话子进程"：父进程也是同名进程的派生进程（新版 ToDesk 会话激活时派生）
+	ChildProcessExcludeArgs []string // 子进程检测时需排除的命令行特征（用于排除常驻的服务/主客户端进程）
+	ToolName                string   // 工具显示名称
+	TCPConnThreshold        int      // TCP连接数阈值（大于等于此值认为被远程，0表示不检测）
+	UDPConnThreshold        int      // UDP连接数阈值（大于此值认为被远程，0表示不检测）
+	UseEstablishedOnly      bool     // 是否只统计ESTABLISHED状态的连接（仅对TCP有效）
 }
 
 // 远程工具配置列表
 var remoteTools = []RemoteTool{
-	{ProcessName: "todesk.exe", CommandLineArgs: []string{"--localPort=", "--isVideoSession=true"}, ToolName: "ToDesk"},
+	// ToDesk 兼容两种检测方式：
+	//   旧版：主客户端命令行同时带 --localPort= 和 --isVideoSession=true
+	//   新版：远程会话激活时，在主客户端下派生一个无参数的 ToDesk.exe 子进程（排除带 --runservice/--localPort 的常驻进程）
+	{ProcessName: "todesk.exe", CommandLineArgs: []string{"--localPort=", "--isVideoSession=true"}, DetectChildProcess: true, ChildProcessExcludeArgs: []string{"--runservice", "--localPort", "--isVideoSession", "--hide"}, ToolName: "ToDesk"},
 	{ProcessName: "AweSun.exe", CommandLineArgs: []string{"--mod=desktopagent", "--port=", "--agentid=", "--lockscreen="}, ToolName: "向日葵"}, // 向日葵使用命令行参数检测
-	{ProcessName: "sunloginclient.exe", ToolName: "向日葵客户端"},                                                                                 // 占位符，待补充检测方法
-	{ProcessName: "GameViewerServer.exe", ToolName: "网易UU远程", TCPConnThreshold: 5, UseEstablishedOnly: true},                                // 网易UU远程，基于TCP连接数检测
-	{ProcessName: "AskLink.exe", ToolName: "AskLink远程", UDPConnThreshold: 1},                                                                // AskLink远程，基于UDP连接数检测
-	{ProcessName: "RCClient.exe", ToolName: "远程看看", WindowTitle: "聊天"},                                                                      // 远程看看，基于窗口标题检测
+	{ProcessName: "sunloginclient.exe", ToolName: "向日葵客户端"},                                                  // 占位符，待补充检测方法
+	{ProcessName: "GameViewerServer.exe", ToolName: "网易UU远程", TCPConnThreshold: 5, UseEstablishedOnly: true}, // 网易UU远程，基于TCP连接数检测
+	{ProcessName: "AskLink.exe", ToolName: "AskLink远程", UDPConnThreshold: 1},                                 // AskLink远程，基于UDP连接数检测
+	{ProcessName: "RCClient.exe", ToolName: "远程看看", WindowTitle: "聊天"},                                       // 远程看看，基于窗口标题检测
 }
 
 func NewWindowsDetector() *WindowsDetector {
@@ -254,6 +259,16 @@ func (d *WindowsDetector) DetectRemoteTools() ([]Signal, error) {
 			}
 		}
 
+		// 如果命令行参数检测失败，尝试"会话子进程"检测
+		// （新版 ToDesk：远程会话激活时会在主客户端下派生一个无参数的同名子进程）
+		if !isRemote && tool.DetectChildProcess {
+			if child := d.detectChildProcess(matchedProcesses, tool.ChildProcessExcludeArgs); child != nil {
+				isRemote = true
+				remoteProcess = child
+				detectionMethod = "会话子进程"
+			}
+		}
+
 		// 如果命令行参数检测失败，尝试窗口类名检测
 		if !isRemote && tool.WindowClass != "" {
 			for _, p := range matchedProcesses {
@@ -330,6 +345,54 @@ func (d *WindowsDetector) DetectRemoteTools() ([]Signal, error) {
 	}
 
 	return signals, nil
+}
+
+// detectChildProcess 检测是否存在"会话子进程"：父进程也是同名进程的派生进程。
+//
+// 新版 ToDesk 在远程会话激活时，会在主客户端（带 --localPort 的进程）下派生一个
+// 无参数的 ToDesk.exe 子进程；会话结束时该子进程退出。利用这一特征判断是否被远程。
+//
+// excludeArgs 用于排除常驻进程：服务进程（--runservice）和主客户端（--localPort/--hide）
+// 本身的父进程可能也是同名进程，必须根据命令行特征排除，否则空闲时会误报。
+// 返回命中的子进程，未命中返回 nil。
+func (d *WindowsDetector) detectChildProcess(processes []*process.Process, excludeArgs []string) *process.Process {
+	// 收集所有同名进程的 PID 集合，用于判断父进程是否同样是该工具的进程
+	pidSet := make(map[int32]bool, len(processes))
+	for _, p := range processes {
+		pidSet[p.Pid] = true
+	}
+
+	for _, p := range processes {
+		// 根据命令行特征排除常驻的服务/主客户端进程
+		if len(excludeArgs) > 0 {
+			cmdline, err := p.Cmdline()
+			if err != nil {
+				// 读不到命令行时无法确认是否为常驻进程，保守跳过，避免误报
+				continue
+			}
+			cmdlineLower := strings.ToLower(cmdline)
+			excluded := false
+			for _, arg := range excludeArgs {
+				if strings.Contains(cmdlineLower, strings.ToLower(arg)) {
+					excluded = true
+					break
+				}
+			}
+			if excluded {
+				continue
+			}
+		}
+
+		// 父进程同样是该工具的进程 => 判定为会话子进程
+		ppid, err := p.Ppid()
+		if err != nil {
+			continue
+		}
+		if pidSet[ppid] {
+			return p
+		}
+	}
+	return nil
 }
 
 // detectWindowClass 检测指定进程是否有指定窗口类名的窗口

@@ -73,8 +73,79 @@ func NewDetector(storage *storage.Storage, notifier Notifier) *Detector {
 		lastState:  false,
 		lastChange: time.Now(),
 	}
+	// 启动检测循环前，先从 SQLite 载入检测规则（首次运行写入内置默认规则作为种子）
+	if err := d.loadRules(); err != nil {
+		log.Printf("[检测器] 载入检测规则失败: %v", err)
+	}
 	go d.detectionLoop()
 	return d
+}
+
+// loadRules 从 SQLite 载入当前生效的检测规则并注入 windows 检测器。
+// 若数据库中尚无任何规则集（首次运行），则把内置默认规则写入 SQLite 作为种子并置为生效。
+func (d *Detector) loadRules() error {
+	has, err := d.storage.HasAnyRuleSet()
+	if err != nil {
+		return err
+	}
+	if !has {
+		// 首次运行：种子内置默认规则
+		rulesJSON, err := DefaultRulesJSON()
+		if err != nil {
+			return err
+		}
+		ruleSet, err := d.storage.SaveRuleSet(DefaultRulesVersion, DefaultRulesVersion, rulesJSON, "builtin")
+		if err != nil {
+			return err
+		}
+		if err := d.storage.SetActiveRuleSet(ruleSet.ID); err != nil {
+			return err
+		}
+		log.Printf("[检测器] 首次初始化内置检测规则 v%s", DefaultRulesVersion)
+	}
+	return d.applyActiveRules()
+}
+
+// applyActiveRules 读取当前生效规则集并注入 windows 检测器。
+func (d *Detector) applyActiveRules() error {
+	active, err := d.storage.GetActiveRuleSet()
+	if err != nil {
+		return err
+	}
+	if active == nil {
+		return fmt.Errorf("无生效的检测规则")
+	}
+	rules, err := ParseRules(active.Rules)
+	if err != nil {
+		return fmt.Errorf("解析规则 JSON 失败: %w", err)
+	}
+	d.windowsMu.Lock()
+	d.windows.SetRules(rules)
+	d.windowsMu.Unlock()
+	log.Printf("[检测器] 已载入检测规则 v%s（%d 条，来源:%s）", active.Version, len(rules), active.Source)
+	return nil
+}
+
+// ReloadRules 重新载入当前生效的检测规则（应用/回滚规则后调用，热更新）。
+func (d *Detector) ReloadRules() error {
+	return d.applyActiveRules()
+}
+
+// GetActiveRuleVersion 返回当前生效规则集的版本号。
+func (d *Detector) GetActiveRuleVersion() (string, error) {
+	active, err := d.storage.GetActiveRuleSet()
+	if err != nil {
+		return "", err
+	}
+	if active == nil {
+		return "", nil
+	}
+	return active.Version, nil
+}
+
+// ListRuleVersions 返回所有规则集版本（供 UI 展示与回滚）。
+func (d *Detector) ListRuleVersions() ([]storage.DetectionRuleSet, error) {
+	return d.storage.ListRuleSets()
 }
 
 func (d *Detector) detectionLoop() {

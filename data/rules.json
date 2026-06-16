@@ -1,0 +1,38 @@
+{
+  "version": "1.0.0",
+  "minAppVersion": "1.0.0",
+  "tools": [
+    {
+      "processName": "todesk.exe",
+      "commandLineArgs": ["--localPort=", "--isVideoSession=true"],
+      "detectChildProcess": true,
+      "childProcessExcludeArgs": ["--runservice", "--localPort", "--isVideoSession", "--hide"],
+      "toolName": "ToDesk"
+    },
+    {
+      "processName": "AweSun.exe",
+      "commandLineArgs": ["--mod=desktopagent", "--port=", "--agentid=", "--lockscreen="],
+      "toolName": "向日葵"
+    },
+    {
+      "processName": "sunloginclient.exe",
+      "toolName": "向日葵客户端"
+    },
+    {
+      "processName": "GameViewerServer.exe",
+      "toolName": "网易UU远程",
+      "tcpConnThreshold": 5,
+      "useEstablishedOnly": true
+    },
+    {
+      "processName": "AskLink.exe",
+      "toolName": "AskLink远程",
+      "udpConnThreshold": 1
+    },
+    {
+      "processName": "RCClient.exe",
+      "toolName": "远程看看",
+      "windowTitle": "聊天"
+    }
+  ]
+}

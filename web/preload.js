@@ -19,5 +19,10 @@ contextBridge.exposeInMainWorld('remoteAudit', {
     getStartupEnabled: () => ipcRenderer.invoke('getStartupEnabled'),
     setStartupEnabled: (enabled) => ipcRenderer.invoke('setStartupEnabled', enabled),
     getDeviceName: () => ipcRenderer.invoke('getDeviceName'),
-    saveDeviceName: (name) => ipcRenderer.invoke('saveDeviceName', name)
+    saveDeviceName: (name) => ipcRenderer.invoke('saveDeviceName', name),
+    rulesGetVersion: () => ipcRenderer.invoke('rulesGetVersion'),
+    rulesCheck: () => ipcRenderer.invoke('rulesCheck'),
+    rulesApply: () => ipcRenderer.invoke('rulesApply'),
+    rulesRollback: (version) => ipcRenderer.invoke('rulesRollback', version),
+    rulesUpload: () => ipcRenderer.invoke('rulesUpload')
 });

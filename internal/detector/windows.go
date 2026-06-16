@@ -21,6 +21,9 @@ type WindowsDetector struct {
 	cacheMutex       sync.RWMutex
 	cacheDuration    time.Duration
 	rdpPort          uint32
+
+	rules   []RemoteTool // 当前生效的检测规则（从 SQLite 动态载入，可热更新）
+	rulesMu sync.RWMutex
 }
 
 var (
@@ -52,39 +55,23 @@ type wtsSessionInfo struct {
 	State          uint32
 }
 
-// RemoteTool 定义远程工具配置
-type RemoteTool struct {
-	ProcessName             string   // 进程名（可为空，表示不检查进程名）
-	WindowClass             string   // 窗口类名（用于检测远程状态）
-	WindowTitle             string   // 窗口标题（用于检测远程状态，支持部分匹配）
-	CommandLineArgs         []string // 命令行参数特征（用于检测远程状态）
-	DetectChildProcess      bool     // 是否检测"会话子进程"：父进程也是同名进程的派生进程（新版 ToDesk 会话激活时派生）
-	ChildProcessExcludeArgs []string // 子进程检测时需排除的命令行特征（用于排除常驻的服务/主客户端进程）
-	ToolName                string   // 工具显示名称
-	TCPConnThreshold        int      // TCP连接数阈值（大于等于此值认为被远程，0表示不检测）
-	UDPConnThreshold        int      // UDP连接数阈值（大于此值认为被远程，0表示不检测）
-	UseEstablishedOnly      bool     // 是否只统计ESTABLISHED状态的连接（仅对TCP有效）
-}
-
-// 远程工具配置列表
-var remoteTools = []RemoteTool{
-	// ToDesk 兼容两种检测方式：
-	//   旧版：主客户端命令行同时带 --localPort= 和 --isVideoSession=true
-	//   新版：远程会话激活时，在主客户端下派生一个无参数的 ToDesk.exe 子进程（排除带 --runservice/--localPort 的常驻进程）
-	{ProcessName: "todesk.exe", CommandLineArgs: []string{"--localPort=", "--isVideoSession=true"}, DetectChildProcess: true, ChildProcessExcludeArgs: []string{"--runservice", "--localPort", "--isVideoSession", "--hide"}, ToolName: "ToDesk"},
-	{ProcessName: "AweSun.exe", CommandLineArgs: []string{"--mod=desktopagent", "--port=", "--agentid=", "--lockscreen="}, ToolName: "向日葵"}, // 向日葵使用命令行参数检测
-	{ProcessName: "sunloginclient.exe", ToolName: "向日葵客户端"},                                                  // 占位符，待补充检测方法
-	{ProcessName: "GameViewerServer.exe", ToolName: "网易UU远程", TCPConnThreshold: 5, UseEstablishedOnly: true}, // 网易UU远程，基于TCP连接数检测
-	{ProcessName: "AskLink.exe", ToolName: "AskLink远程", UDPConnThreshold: 1},                                 // AskLink远程，基于UDP连接数检测
-	{ProcessName: "RCClient.exe", ToolName: "远程看看", WindowTitle: "聊天"},                                       // 远程看看，基于窗口标题检测
-}
+// RemoteTool 结构体与默认规则现已迁移到 rules.go（无 build tag，跨平台编译）。
+// 检测规则改为从 SQLite 动态载入，由 detector 通过 SetRules 注入。
 
 func NewWindowsDetector() *WindowsDetector {
 	return &WindowsDetector{
 		processCache:  make(map[string][]*process.Process),
 		cacheDuration: 3 * time.Second,
 		rdpPort:       readRDPPort(),
+		rules:         []RemoteTool{}, // 初始为空，由 detector 启动时从 SQLite 注入
 	}
+}
+
+// SetRules 原子替换当前生效的检测规则（应用/回滚规则时调用，热更新）。
+func (d *WindowsDetector) SetRules(rules []RemoteTool) {
+	d.rulesMu.Lock()
+	d.rules = rules
+	d.rulesMu.Unlock()
 }
 
 // readRDPPort 从注册表读取 RDP 监听端口，读取失败时返回默认值 3389
@@ -184,8 +171,13 @@ func (d *WindowsDetector) DetectRemoteTools() ([]Signal, error) {
 	// 优化：不再获取所有进程，而是使用进程名直接查找
 	// 这样可以大幅减少系统调用次数
 
+	// 在 RLock 下取规则快照，避免与热更新（SetRules）并发冲突
+	d.rulesMu.RLock()
+	rules := d.rules
+	d.rulesMu.RUnlock()
+
 	// 检查每个远程工具
-	for _, tool := range remoteTools {
+	for _, tool := range rules {
 		// 第一步：收集所有匹配的进程（可能有多个同名进程，或检查所有进程）
 		var matchedProcesses []*process.Process
 

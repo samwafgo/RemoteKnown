@@ -23,9 +23,13 @@ jobs:
     
     - name: Build Go Backend
       # Build the daemon. The output must be in the root so electron-builder can find it via ../RemoteKnown-daemon.exe
+      # 从 git tag 注入版本号（去掉前缀 v），作为检测规则 minAppVersion 门槛的当前版本
+      shell: bash
       run: |
+        VERSION="${GITHUB_REF_NAME#v}"
+        echo "Injecting daemon version: ${VERSION}"
         go mod tidy
-        go build -ldflags="-s -w -H windowsgui" -o RemoteKnown-daemon.exe ./cmd/main.go
+        go build -ldflags="-s -w -H windowsgui -X RemoteKnown/internal/version.Version=${VERSION}" -o RemoteKnown-daemon.exe ./cmd/main.go
     
     - name: Setup Node.js
       uses: actions/setup-node@v4

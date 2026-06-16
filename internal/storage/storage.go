@@ -62,6 +62,18 @@ type Config struct {
 	UpdatedAt time.Time `gorm:"autoUpdateTime" json:"updated_at"`
 }
 
+// DetectionRuleSet 检测规则集（一个版本一行），支持版本化与回滚。
+// Active 标志指向当前生效的规则集；回滚 = 把 Active 切到历史行。
+type DetectionRuleSet struct {
+	ID            string    `gorm:"primaryKey;type:text" json:"id"`
+	Version       string    `gorm:"type:text;index" json:"version"`   // 规则版本号，如 "1.0.0"
+	MinAppVersion string    `gorm:"type:text" json:"min_app_version"` // 该规则要求的最低主程序(exe)版本
+	Rules         string    `gorm:"type:text" json:"rules"`           // 规则 JSON 数组（[]RemoteTool）
+	Source        string    `gorm:"type:text" json:"source"`          // 来源："builtin" | "github"
+	Active        bool      `gorm:"index" json:"active"`              // 是否当前生效版本
+	CreatedAt     time.Time `gorm:"autoCreateTime" json:"created_at"`
+}
+
 func NewStorage(dbPath string) (*Storage, error) {
 	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
 	if err != nil {
@@ -96,6 +108,16 @@ func (s *Storage) runMigrations() error {
 			Rollback: func(tx *gorm.DB) error {
 				// 回滚时删除表
 				return tx.Migrator().DropTable(&RemoteSession{}, &RawSignal{}, &Config{})
+			},
+		},
+		{
+			ID: "20260616000001",
+			Migrate: func(tx *gorm.DB) error {
+				// 检测规则集表（版本化 + 回滚）
+				return tx.AutoMigrate(&DetectionRuleSet{})
+			},
+			Rollback: func(tx *gorm.DB) error {
+				return tx.Migrator().DropTable(&DetectionRuleSet{})
 			},
 		},
 	})
@@ -218,4 +240,86 @@ func (s *Storage) SetConfig(key, value string) error {
 			"value":      value,
 			"updated_at": time.Now(),
 		}).Error
+}
+
+// HasAnyRuleSet 判断是否已有任意规则集（用于决定是否首次种子）。
+func (s *Storage) HasAnyRuleSet() (bool, error) {
+	var count int64
+	err := s.db.Model(&DetectionRuleSet{}).Count(&count).Error
+	return count > 0, err
+}
+
+// SaveRuleSet 保存一个规则集版本。若同版本已存在，则返回既有行（不重复插入）。
+func (s *Storage) SaveRuleSet(version, minAppVersion, rulesJSON, source string) (*DetectionRuleSet, error) {
+	var existing DetectionRuleSet
+	err := s.db.Where("version = ?", version).First(&existing).Error
+	if err == nil {
+		return &existing, nil
+	}
+	if err != gorm.ErrRecordNotFound {
+		return nil, err
+	}
+
+	ruleSet := DetectionRuleSet{
+		ID:            uuid.New().String(),
+		Version:       version,
+		MinAppVersion: minAppVersion,
+		Rules:         rulesJSON,
+		Source:        source,
+		Active:        false,
+	}
+	if err := s.db.Create(&ruleSet).Error; err != nil {
+		return nil, err
+	}
+	return &ruleSet, nil
+}
+
+// GetActiveRuleSet 返回当前生效的规则集；不存在时返回 (nil, nil)。
+func (s *Storage) GetActiveRuleSet() (*DetectionRuleSet, error) {
+	var ruleSet DetectionRuleSet
+	err := s.db.Where("active = ?", true).First(&ruleSet).Error
+	if err == gorm.ErrRecordNotFound {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &ruleSet, nil
+}
+
+// SetActiveRuleSet 把指定 ID 的规则集置为生效，其余全部置为非生效（事务保证一致）。
+func (s *Storage) SetActiveRuleSet(id string) error {
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&DetectionRuleSet{}).Where("active = ?", true).Update("active", false).Error; err != nil {
+			return err
+		}
+		result := tx.Model(&DetectionRuleSet{}).Where("id = ?", id).Update("active", true)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return fmt.Errorf("规则集不存在: %s", id)
+		}
+		return nil
+	})
+}
+
+// GetRuleSetByVersion 按版本号查找规则集；不存在时返回 (nil, nil)。
+func (s *Storage) GetRuleSetByVersion(version string) (*DetectionRuleSet, error) {
+	var ruleSet DetectionRuleSet
+	err := s.db.Where("version = ?", version).First(&ruleSet).Error
+	if err == gorm.ErrRecordNotFound {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &ruleSet, nil
+}
+
+// ListRuleSets 返回所有规则集版本（按创建时间倒序），供 UI 展示与回滚选择。
+func (s *Storage) ListRuleSets() ([]DetectionRuleSet, error) {
+	var ruleSets []DetectionRuleSet
+	err := s.db.Order("created_at DESC").Find(&ruleSets).Error
+	return ruleSets, err
 }

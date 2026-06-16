@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, Notification } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, Notification, dialog } = require('electron');
 const { spawn, spawnSync } = require('child_process');
 const path = require('path');
 const http = require('http');
@@ -582,6 +582,42 @@ function setupIPC() {
 
     ipcMain.handle('saveDeviceName', async (event, name) => {
         return await fetchAPIPost('/api/device-name', { name });
+    });
+
+    // 检测规则版本管理
+    ipcMain.handle('rulesGetVersion', async () => {
+        return await fetchAPI('/api/rules/version');
+    });
+
+    ipcMain.handle('rulesCheck', async () => {
+        return await fetchAPIPost('/api/rules/check', {});
+    });
+
+    ipcMain.handle('rulesApply', async () => {
+        return await fetchAPIPost('/api/rules/apply', {});
+    });
+
+    ipcMain.handle('rulesRollback', async (event, version) => {
+        return await fetchAPIPost('/api/rules/rollback', { version });
+    });
+
+    // 手工导入规则文件（面向内网/离线环境）
+    ipcMain.handle('rulesUpload', async () => {
+        const { canceled, filePaths } = await dialog.showOpenDialog({
+            title: '选择规则文件 (rules.json)',
+            filters: [{ name: 'JSON 规则文件', extensions: ['json'] }],
+            properties: ['openFile']
+        });
+        if (canceled || !filePaths || filePaths.length === 0) {
+            return { canceled: true };
+        }
+        let content;
+        try {
+            content = JSON.parse(fs.readFileSync(filePaths[0], 'utf8'));
+        } catch (e) {
+            throw new Error('规则文件不是有效的 JSON: ' + e.message);
+        }
+        return await fetchAPIPost('/api/rules/upload', content);
     });
 
     ipcMain.handle('getAppVersion', () => {

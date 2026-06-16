@@ -26,7 +26,10 @@ echo.
 echo.
 echo [1/4] Building Go backend...
 cd /d "%~dp0"
-go build -ldflags="-H windowsgui" -o RemoteKnown-daemon.exe ./cmd/main.go
+REM Read version from web/package.json (single source of truth) and inject into the daemon
+for /f "usebackq delims=" %%i in (`node -p "require('./web/package.json').version"`) do set "APP_VERSION=%%i"
+echo [INFO] Injecting daemon version: %APP_VERSION%
+go build -ldflags="-H windowsgui -X RemoteKnown/internal/version.Version=%APP_VERSION%" -o RemoteKnown-daemon.exe ./cmd/main.go
 if errorlevel 1 (
     echo [ERROR] Go build failed
     exit /b 1

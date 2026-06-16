@@ -849,6 +849,28 @@
                             </div>
                             <div class="help-text">系统启动时自动运行远程知道了，实时保护您的设备安全</div>
                         </div>
+                        <div class="form-group">
+                            <label>检测规则</label>
+                            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                                <span style="font-size:13px; color:#374151;">当前规则版本：<strong id="ruleVersion">-</strong></span>
+                                <span style="font-size:12px; color:#9ca3af;">主程序 v<span id="ruleAppVersion">-</span></span>
+                                <button type="button" class="btn btn-primary" id="checkRulesBtn" onclick="checkRulesUpdate()" style="white-space:nowrap; font-size:12px; padding:4px 12px;">检查更新</button>
+                                <button type="button" class="btn" id="uploadRulesBtn" onclick="uploadRules()" style="white-space:nowrap; font-size:12px; padding:4px 12px;">手工导入</button>
+                            </div>
+                            <div class="help-text">检测规则支持自动更新；内网/离线环境可手工导入规则文件（rules.json）。</div>
+                            <div id="rulesUpdateInfo" style="display:none; margin-top:8px; background:#eff6ff; padding:10px; border-radius:4px; border:1px solid #dbeafe;">
+                                <p id="rulesUpdateText" style="margin:0 0 6px 0; font-size:13px; color:#1e40af;"></p>
+                                <div>
+                                    <button class="action-link" id="rulesApplyBtn" onclick="applyRulesUpdate()">应用</button>
+                                    <button class="action-link" onclick="dismissRulesUpdate()">忽略</button>
+                                </div>
+                            </div>
+                            <div id="rulesMsg" style="display:none; margin-top:6px; font-size:12px;"></div>
+                            <div style="margin-top:10px;">
+                                <label style="font-size:12px; color:#6b7280;">历史版本（可回滚）</label>
+                                <div id="ruleVersionList" style="margin-top:4px;"></div>
+                            </div>
+                        </div>
                     </div>
 
                     <!-- 关于 Tab -->
@@ -1167,6 +1189,8 @@
             if (tabName === 'general') {
                 loadStartupConfig();
                 loadDeviceName();
+                loadRulesInfo();
+                autoCheckRulesUpdate();
             } else if (tabName === 'notification') {
                 loadNotificationConfig();
             }
@@ -1204,6 +1228,8 @@
             if (tabName === 'general') {
                 loadStartupConfig();
                 loadDeviceName();
+                loadRulesInfo();
+                autoCheckRulesUpdate();
             }
         }
 
@@ -1251,6 +1277,142 @@
             if (!window.remoteAudit) return;
             await window.remoteAudit.setStartupEnabled(this.checked);
         });
+
+        // ===== 检测规则更新 =====
+        let rulesAutoChecked = false;
+
+        function showRulesMsg(text, color) {
+            const msg = document.getElementById('rulesMsg');
+            msg.textContent = text;
+            msg.style.color = color;
+            msg.style.display = 'block';
+        }
+
+        async function loadRulesInfo() {
+            if (!window.remoteAudit || !window.remoteAudit.rulesGetVersion) return;
+            try {
+                const data = await window.remoteAudit.rulesGetVersion();
+                document.getElementById('ruleVersion').innerText = data.currentVersion || '-';
+                document.getElementById('ruleAppVersion').innerText = data.appVersion || '-';
+                renderRuleVersions(data.versions || []);
+            } catch (e) {
+                document.getElementById('ruleVersion').innerText = '加载失败';
+            }
+        }
+
+        function renderRuleVersions(versions) {
+            const container = document.getElementById('ruleVersionList');
+            if (!versions.length) {
+                container.innerHTML = '<span style="font-size:12px;color:#9ca3af;">暂无历史版本</span>';
+                return;
+            }
+            container.innerHTML = versions.map(v => {
+                const tag = v.active ? '<span style="color:#16a34a;"> （当前）</span>' : '';
+                const srcLabel = v.source === 'builtin' ? '内置' : (v.source === 'manual' ? '手工' : 'GitHub');
+                const btn = v.active
+                    ? ''
+                    : `<button class="action-link" style="margin-left:8px;" onclick="rollbackRules('${v.version}')">回滚</button>`;
+                return `<div style="display:flex;align-items:center;font-size:12px;color:#374151;padding:3px 0;">
+                    <span>v${v.version} · ${srcLabel}${tag}</span>${btn}
+                </div>`;
+            }).join('');
+        }
+
+        // 进入通用页时自动静默检查一次（每个会话仅一次，避免频繁请求 GitHub）
+        function autoCheckRulesUpdate() {
+            if (rulesAutoChecked) return;
+            rulesAutoChecked = true;
+            checkRulesUpdate(true);
+        }
+
+        async function checkRulesUpdate(silent = false) {
+            if (!window.remoteAudit || !window.remoteAudit.rulesCheck) return;
+            const btn = document.getElementById('checkRulesBtn');
+            const info = document.getElementById('rulesUpdateInfo');
+            const applyBtn = document.getElementById('rulesApplyBtn');
+            if (!silent) {
+                btn.disabled = true;
+                btn.innerText = '检查中…';
+                document.getElementById('rulesMsg').style.display = 'none';
+            }
+            try {
+                const r = await window.remoteAudit.rulesCheck();
+                if (!r.updateAvailable) {
+                    info.style.display = 'none';
+                    if (!silent) showRulesMsg('已是最新版本（v' + (r.currentVersion || '') + '）', '#16a34a');
+                } else if (r.requiresAppUpgrade) {
+                    document.getElementById('rulesUpdateText').innerText =
+                        `发现规则新版本 v${r.latestVersion}，但需先将主程序升级到 v${r.requiredAppVersion}（当前 v${r.appVersion}）。请先升级主程序，再更新规则。`;
+                    applyBtn.style.display = 'none';
+                    info.style.display = 'block';
+                } else {
+                    document.getElementById('rulesUpdateText').innerText =
+                        `发现规则新版本 v${r.latestVersion}` + (r.description ? `：${r.description}` : '') + '，是否应用？';
+                    applyBtn.style.display = '';
+                    info.style.display = 'block';
+                }
+            } catch (e) {
+                if (!silent) showRulesMsg('检查更新失败：' + e.message, '#dc2626');
+            } finally {
+                if (!silent) {
+                    btn.disabled = false;
+                    btn.innerText = '检查更新';
+                }
+            }
+        }
+
+        async function applyRulesUpdate() {
+            if (!window.remoteAudit || !window.remoteAudit.rulesApply) return;
+            const applyBtn = document.getElementById('rulesApplyBtn');
+            applyBtn.disabled = true;
+            applyBtn.innerText = '应用中…';
+            try {
+                const r = await window.remoteAudit.rulesApply();
+                document.getElementById('rulesUpdateInfo').style.display = 'none';
+                showRulesMsg(r.message || '规则已更新', '#16a34a');
+                loadRulesInfo();
+            } catch (e) {
+                showRulesMsg('应用失败：' + e.message, '#dc2626');
+            } finally {
+                applyBtn.disabled = false;
+                applyBtn.innerText = '应用';
+            }
+        }
+
+        async function rollbackRules(version) {
+            if (!window.remoteAudit || !window.remoteAudit.rulesRollback) return;
+            if (!confirm(`确定回滚到规则 v${version}？`)) return;
+            try {
+                const r = await window.remoteAudit.rulesRollback(version);
+                showRulesMsg(r.message || '已回滚', '#16a34a');
+                loadRulesInfo();
+            } catch (e) {
+                showRulesMsg('回滚失败：' + e.message, '#dc2626');
+            }
+        }
+
+        function dismissRulesUpdate() {
+            document.getElementById('rulesUpdateInfo').style.display = 'none';
+        }
+
+        async function uploadRules() {
+            if (!window.remoteAudit || !window.remoteAudit.rulesUpload) return;
+            const btn = document.getElementById('uploadRulesBtn');
+            btn.disabled = true;
+            btn.innerText = '导入中…';
+            try {
+                const r = await window.remoteAudit.rulesUpload();
+                if (r && r.canceled) return; // 用户取消选择文件
+                showRulesMsg((r && r.message) || '规则已导入', '#16a34a');
+                document.getElementById('rulesUpdateInfo').style.display = 'none';
+                loadRulesInfo();
+            } catch (e) {
+                showRulesMsg('导入失败：' + e.message, '#dc2626');
+            } finally {
+                btn.disabled = false;
+                btn.innerText = '手工导入';
+            }
+        }
 
         // 点击模态框外部关闭
         window.onclick = function (event) {

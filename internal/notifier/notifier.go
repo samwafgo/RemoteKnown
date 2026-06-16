@@ -358,6 +358,7 @@ func (n *Notifier) sendEmailNotification(config NotificationConfig, title, conte
 	}
 
 	// 认证（可选）：填了用户名才认证，内网匿名发送可留空
+	authenticated := false
 	if e.Username != "" {
 		if ok, _ := client.Extension("AUTH"); ok {
 			var auth smtp.Auth
@@ -368,14 +369,19 @@ func (n *Notifier) sendEmailNotification(config NotificationConfig, title, conte
 				auth = &plainAuthNoTLS{username: e.Username, password: e.Password}
 			}
 			if err := client.Auth(auth); err != nil {
-				return fmt.Errorf("SMTP 认证失败: %w", err)
+				return fmt.Errorf("SMTP 认证失败（请检查用户名/密码；QQ/163/Gmail 等公网邮箱密码必须用“授权码”而非登录密码）: %w", err)
 			}
-		} else if debugMode {
-			log.Printf("[通知器] 服务器未通告 AUTH，跳过认证")
+			authenticated = true
+		} else {
+			return fmt.Errorf("服务器未提供 AUTH 认证，通常是因为连接未加密。公网邮箱请把“加密方式”改为 SSL(465) 或 STARTTLS(587) 后重试")
 		}
 	}
 
 	if err := client.Mail(e.From); err != nil {
+		// 多数公网邮箱要求先登录才能发信（如 503 need AUTH first）
+		if !authenticated {
+			return fmt.Errorf("设置发件人失败，服务器很可能要求先登录认证。请填写用户名/密码，并将加密方式选为 SSL 或 STARTTLS（公网邮箱密码用“授权码”）: %w", err)
+		}
 		return fmt.Errorf("设置发件人失败: %w", err)
 	}
 	for _, rcpt := range recipients {

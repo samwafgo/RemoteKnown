@@ -338,11 +338,15 @@
 
         .modal-content {
             background-color: #fff;
-            margin: 10% auto;
+            margin: 5vh auto;
             padding: 0;
             border-radius: 8px;
             width: 500px;
             max-width: 90%;
+            max-height: 90vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
             box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
         }
 
@@ -494,6 +498,8 @@
             display: flex;
             min-height: 300px;
             padding: 0;
+            flex: 1 1 auto;
+            overflow: hidden;
         }
 
         .settings-sidebar {
@@ -533,6 +539,15 @@
             flex: 1;
             padding: 24px;
             overflow-y: auto;
+            min-height: 0;
+        }
+
+        .preset-row {
+            cursor: pointer;
+        }
+
+        .preset-row:hover {
+            background: #eff6ff;
         }
 
         .tab-pane {
@@ -686,9 +701,40 @@
                             </div>
                             <!-- 邮件 (SMTP) 配置，仅当通知类型为邮件时显示 -->
                             <div id="emailGroup" style="display: none;">
+                                <details style="margin-bottom: 14px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 8px 12px;">
+                                    <summary style="cursor: pointer; font-size: 13px; color: #374151; font-weight: 500;">📋 常见邮箱怎么填（点击展开）</summary>
+                                    <div style="font-size: 12px; color: #555; margin-top: 8px; line-height: 1.7;">
+                                        <p style="margin: 0 0 6px; color: #b91c1c;"><b>公网邮箱的“密码”一律填授权码，不是登录密码！</b></p>
+                                        <p style="margin: 0 0 6px; color: #2563eb;">👇 点击下面任意一行，自动填入「服务器 / 加密 / 端口」</p>
+                                        <table style="width:100%; border-collapse: collapse; font-size: 12px;">
+                                            <thead>
+                                                <tr style="text-align:left; color:#374151; border-bottom:1px solid #e5e7eb;">
+                                                    <th style="padding:3px 4px;">邮箱</th>
+                                                    <th style="padding:3px 4px;">SMTP 服务器</th>
+                                                    <th style="padding:3px 4px;">加密</th>
+                                                    <th style="padding:3px 4px;">端口</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <tr class="preset-row" onclick="applyEmailPreset('smtp.qq.com','ssl',465)" title="点击填入"><td style="padding:3px 4px;">QQ 邮箱</td><td style="padding:3px 4px;">smtp.qq.com</td><td style="padding:3px 4px;">SSL</td><td style="padding:3px 4px;">465</td></tr>
+                                                <tr class="preset-row" onclick="applyEmailPreset('smtp.163.com','ssl',465)" title="点击填入"><td style="padding:3px 4px;">163 邮箱</td><td style="padding:3px 4px;">smtp.163.com</td><td style="padding:3px 4px;">SSL</td><td style="padding:3px 4px;">465</td></tr>
+                                                <tr class="preset-row" onclick="applyEmailPreset('smtp.gmail.com','ssl',465)" title="点击填入"><td style="padding:3px 4px;">Gmail</td><td style="padding:3px 4px;">smtp.gmail.com</td><td style="padding:3px 4px;">SSL</td><td style="padding:3px 4px;">465</td></tr>
+                                                <tr class="preset-row" onclick="applyEmailPreset('smtp.office365.com','starttls',587)" title="点击填入"><td style="padding:3px 4px;">Outlook</td><td style="padding:3px 4px;">smtp.office365.com</td><td style="padding:3px 4px;">STARTTLS</td><td style="padding:3px 4px;">587</td></tr>
+                                                <tr class="preset-row" onclick="applyEmailPreset('smtp.exmail.qq.com','ssl',465)" title="点击填入"><td style="padding:3px 4px;">腾讯企业邮</td><td style="padding:3px 4px;">smtp.exmail.qq.com</td><td style="padding:3px 4px;">SSL</td><td style="padding:3px 4px;">465</td></tr>
+                                                <tr class="preset-row" onclick="applyEmailPreset('','none',25)" title="点击填入（服务器请自行填写内网地址）"><td style="padding:3px 4px;">内网邮件</td><td style="padding:3px 4px;">内网IP/域名</td><td style="padding:3px 4px;">不加密</td><td style="padding:3px 4px;">25</td></tr>
+                                            </tbody>
+                                        </table>
+                                        <p style="margin: 8px 0 0;">
+                                            · <b>用户名</b>＝完整邮箱地址（如 abc@qq.com），<b>发件人</b>通常也填它<br>
+                                            · 公网邮箱必须选 <b>SSL</b> 或 <b>STARTTLS</b> 并填用户名+授权码<br>
+                                            · QQ/163 授权码：邮箱网页版「设置 → 账户 → POP3/IMAP/SMTP 服务」开启后获取<br>
+                                            · 仅<b>内网且允许匿名</b>的服务器才用“不加密”、用户名/密码留空
+                                        </p>
+                                    </div>
+                                </details>
                                 <div class="form-group">
                                     <label for="emailSmtpHost">SMTP 服务器</label>
-                                    <input type="text" id="emailSmtpHost" placeholder="如 smtp.example.com 或内网邮件服务器IP">
+                                    <input type="text" id="emailSmtpHost" placeholder="如 smtp.qq.com 或内网邮件服务器IP">
                                 </div>
                                 <div class="form-group">
                                     <label for="emailEncryption">加密方式</label>
@@ -697,7 +743,7 @@
                                         <option value="starttls">STARTTLS</option>
                                         <option value="ssl">SSL / TLS</option>
                                     </select>
-                                    <div class="help-text">内网无加密的邮件服务器请选“不加密”</div>
+                                    <div class="help-text">公网邮箱(QQ/163/Gmail 等)请选 SSL；仅内网无加密服务器才选“不加密”</div>
                                 </div>
                                 <div class="form-group">
                                     <label for="emailSmtpPort">SMTP 端口</label>
@@ -706,19 +752,19 @@
                                 </div>
                                 <div class="form-group">
                                     <label for="emailFrom">发件人地址</label>
-                                    <input type="text" id="emailFrom" placeholder="alert@example.com">
+                                    <input type="text" id="emailFrom" placeholder="通常与用户名相同，如 abc@qq.com">
                                 </div>
                                 <div class="form-group">
                                     <label for="emailTo">收件人地址</label>
                                     <input type="text" id="emailTo" placeholder="多个收件人用逗号分隔">
                                 </div>
                                 <div class="form-group">
-                                    <label for="emailUsername">用户名（可选）</label>
-                                    <input type="text" id="emailUsername" placeholder="留空则匿名发送（内网常见）">
+                                    <label for="emailUsername">用户名（公网邮箱必填）</label>
+                                    <input type="text" id="emailUsername" placeholder="完整邮箱地址；内网匿名可留空">
                                 </div>
                                 <div class="form-group">
-                                    <label for="emailPassword">密码 / 授权码（可选）</label>
-                                    <input type="password" id="emailPassword" placeholder="留空则匿名发送">
+                                    <label for="emailPassword">密码 / 授权码（公网邮箱必填）</label>
+                                    <input type="password" id="emailPassword" placeholder="公网邮箱填授权码（非登录密码）；内网匿名可留空">
                                 </div>
                             </div>
                             <div class="form-group">
@@ -1409,6 +1455,29 @@
             // 签名密钥仅钉钉需要
             document.getElementById('secretGroup').style.display = (type === 'dingtalk') ? 'block' : 'none';
         }
+
+        // 点击常见邮箱预设，自动填入服务器/加密/端口（不覆盖用户名/密码/收发件人）
+        function applyEmailPreset(host, encryption, port) {
+            const hostEl = document.getElementById('emailSmtpHost');
+            document.getElementById('emailEncryption').value = encryption || 'none';
+            document.getElementById('emailSmtpPort').value = port ? port : '';
+            if (host) {
+                hostEl.value = host;
+            } else {
+                // 内网预设：服务器地址需用户自填，清空并聚焦
+                hostEl.value = '';
+                hostEl.focus();
+            }
+        }
+
+        // 填完用户名后，若发件人为空则自动同步（公网邮箱发件人通常与用户名相同）
+        document.getElementById('emailUsername').addEventListener('blur', function () {
+            const fromEl = document.getElementById('emailFrom');
+            const val = this.value.trim();
+            if (val && !fromEl.value.trim()) {
+                fromEl.value = val;
+            }
+        });
 
         // 通知类型改变时保存旧类型配置、切换并刷新字段显示
         document.getElementById('notificationType').addEventListener('change', function () {

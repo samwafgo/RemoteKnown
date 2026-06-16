@@ -66,6 +66,18 @@
     *   **System Tray Icon Status Change** (Green for Safe, Red for Warning)
     *   **IM Webhook Push** (Supports Feishu/Lark, DingTalk)
 *   **🔒 Privacy First**: All data is stored locally in an SQLite database. No sensitive information is uploaded.
+*   **🔄 Updatable Detection Rules**: Detection rules are decoupled from the app — supporting **online auto-update**, **manual import** (`rules.json`) for intranet/offline use, and **versioned rollback**. See [`data/`](data/README.md) for authoring.
+
+## 🔄 Detection Rule Updates
+
+Remote tools keep evolving, so detection rules must evolve too. Rules are **decoupled** from the main app, stored locally in SQLite, and versioned for rollback:
+
+*   **Auto Update**: Go to `Settings → General → Detection Rules` and click "Check for Updates" to pull the latest rules from GitHub, then apply after confirmation.
+*   **Manual Import** (intranet / offline): Click "Manual Import" and pick a `rules.json` file to import it directly.
+*   **Rollback**: Every version is kept locally; you can roll back to any historical version anytime.
+*   **Version Gate**: A rule set can declare the **minimum app version** it requires; if your app is too old, you'll be prompted to upgrade the app first, then update the rules.
+
+> 📂 **How to write rules?** Rule files live in the repo-root [`data/`](data/) directory (`version.json` + `rules.json`). Field meanings, full examples, and the publishing workflow are documented in **[data/README.md](data/README.md)**.
 
 ## 🚀 Getting Started
 
@@ -115,8 +127,10 @@ After the build completes, the installer will be located in the `web/dist` direc
 RemoteKnown/
 ├── build.bat             # One-click build script (Windows)
 ├── cmd/                  # Go program entry
+├── data/                 # Detection rule publish source (version.json / rules.json) & authoring guide
 ├── internal/             # Go core business logic
 │   ├── detector/         # Remote feature detection engine
+│   ├── ruleupdate/       # Online detection rule update (fetch / version compare)
 │   ├── server/           # Local HTTP API server
 │   └── storage/          # SQLite database operations
 ├── web/                  # Electron frontend source

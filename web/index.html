@@ -671,9 +671,10 @@
                                 <select id="notificationType" name="type">
                                     <option value="feishu">飞书</option>
                                     <option value="dingtalk">钉钉</option>
+                                    <option value="email">邮件 (SMTP)</option>
                                 </select>
                             </div>
-                            <div class="form-group">
+                            <div class="form-group" id="webhookGroup">
                                 <label for="webhookURL">Webhook URL</label>
                                 <input type="text" id="webhookURL" name="webhook_url" placeholder="请输入Webhook地址">
                                 <div class="help-text">飞书或钉钉机器人的Webhook地址</div>
@@ -682,6 +683,43 @@
                                 <label for="webhookSecret">签名密钥（可选）</label>
                                 <input type="text" id="webhookSecret" name="secret" placeholder="钉钉签名密钥（可选）">
                                 <div class="help-text">仅钉钉需要，如果机器人配置了签名验证，请填写</div>
+                            </div>
+                            <!-- 邮件 (SMTP) 配置，仅当通知类型为邮件时显示 -->
+                            <div id="emailGroup" style="display: none;">
+                                <div class="form-group">
+                                    <label for="emailSmtpHost">SMTP 服务器</label>
+                                    <input type="text" id="emailSmtpHost" placeholder="如 smtp.example.com 或内网邮件服务器IP">
+                                </div>
+                                <div class="form-group">
+                                    <label for="emailEncryption">加密方式</label>
+                                    <select id="emailEncryption">
+                                        <option value="none">不加密（内网 / 明文）</option>
+                                        <option value="starttls">STARTTLS</option>
+                                        <option value="ssl">SSL / TLS</option>
+                                    </select>
+                                    <div class="help-text">内网无加密的邮件服务器请选“不加密”</div>
+                                </div>
+                                <div class="form-group">
+                                    <label for="emailSmtpPort">SMTP 端口</label>
+                                    <input type="number" id="emailSmtpPort" placeholder="留空自动：不加密25 / STARTTLS587 / SSL465">
+                                    <div class="help-text">留空将按加密方式使用默认端口</div>
+                                </div>
+                                <div class="form-group">
+                                    <label for="emailFrom">发件人地址</label>
+                                    <input type="text" id="emailFrom" placeholder="alert@example.com">
+                                </div>
+                                <div class="form-group">
+                                    <label for="emailTo">收件人地址</label>
+                                    <input type="text" id="emailTo" placeholder="多个收件人用逗号分隔">
+                                </div>
+                                <div class="form-group">
+                                    <label for="emailUsername">用户名（可选）</label>
+                                    <input type="text" id="emailUsername" placeholder="留空则匿名发送（内网常见）">
+                                </div>
+                                <div class="form-group">
+                                    <label for="emailPassword">密码 / 授权码（可选）</label>
+                                    <input type="password" id="emailPassword" placeholder="留空则匿名发送">
+                                </div>
                             </div>
                             <div class="form-group">
                                 <div id="testResult"
@@ -1332,47 +1370,78 @@
         // 缓存不同类型的通知配置
         let notificationConfigs = {
             feishu: { webhook_url: '', secret: '' },
-            dingtalk: { webhook_url: '', secret: '' }
+            dingtalk: { webhook_url: '', secret: '' },
+            email: { smtp_host: '', smtp_port: '', encryption: 'none', username: '', password: '', from: '', to: '' }
         };
         let currentNotificationType = 'feishu';
 
-        // 通知类型改变时显示/隐藏签名密钥字段，并切换配置
-        document.getElementById('notificationType').addEventListener('change', function () {
-            // 保存切换前的类型的配置到缓存（使用旧的 currentNotificationType）
-            notificationConfigs[currentNotificationType] = {
-                webhook_url: document.getElementById('webhookURL').value.trim(),
-                secret: document.getElementById('webhookSecret').value.trim()
+        // 从邮件表单读取配置
+        function getEmailFormConfig() {
+            const portVal = document.getElementById('emailSmtpPort').value.trim();
+            return {
+                smtp_host: document.getElementById('emailSmtpHost').value.trim(),
+                smtp_port: portVal === '' ? 0 : (parseInt(portVal, 10) || 0),
+                encryption: document.getElementById('emailEncryption').value,
+                username: document.getElementById('emailUsername').value.trim(),
+                password: document.getElementById('emailPassword').value,
+                from: document.getElementById('emailFrom').value.trim(),
+                to: document.getElementById('emailTo').value.trim()
             };
-            
-            // 切换到新类型
+        }
+
+        // 将邮件配置填充到表单
+        function setEmailFormConfig(cfg) {
+            cfg = cfg || {};
+            document.getElementById('emailSmtpHost').value = cfg.smtp_host || '';
+            document.getElementById('emailSmtpPort').value = (cfg.smtp_port && cfg.smtp_port > 0) ? cfg.smtp_port : '';
+            document.getElementById('emailEncryption').value = cfg.encryption || 'none';
+            document.getElementById('emailUsername').value = cfg.username || '';
+            document.getElementById('emailPassword').value = cfg.password || '';
+            document.getElementById('emailFrom').value = cfg.from || '';
+            document.getElementById('emailTo').value = cfg.to || '';
+        }
+
+        // 根据通知类型显示/隐藏对应的字段分组
+        function updateNotificationFields(type) {
+            const isEmail = type === 'email';
+            document.getElementById('webhookGroup').style.display = isEmail ? 'none' : 'block';
+            document.getElementById('emailGroup').style.display = isEmail ? 'block' : 'none';
+            // 签名密钥仅钉钉需要
+            document.getElementById('secretGroup').style.display = (type === 'dingtalk') ? 'block' : 'none';
+        }
+
+        // 通知类型改变时保存旧类型配置、切换并刷新字段显示
+        document.getElementById('notificationType').addEventListener('change', function () {
+            // 保存切换前类型的配置到缓存（currentNotificationType 仍是旧值）
+            saveTypeToCache(currentNotificationType);
+
+            // 切换到新类型并加载其配置
             currentNotificationType = this.value;
-            
-            // 加载新类型的配置
             loadTypeFromCache(currentNotificationType);
-            
-            // 显示/隐藏签名密钥字段
-            const secretGroup = document.getElementById('secretGroup');
-            if (this.value === 'dingtalk') {
-                secretGroup.style.display = 'block';
-            } else {
-                secretGroup.style.display = 'none';
-            }
+            updateNotificationFields(currentNotificationType);
         });
 
-        // 保存当前表单数据到缓存
-        function saveCurrentTypeToCache() {
-            const type = document.getElementById('notificationType').value;
-            notificationConfigs[type] = {
-                webhook_url: document.getElementById('webhookURL').value.trim(),
-                secret: document.getElementById('webhookSecret').value.trim()
-            };
+        // 把当前表单内容保存到指定类型的缓存
+        function saveTypeToCache(type) {
+            if (type === 'email') {
+                notificationConfigs.email = getEmailFormConfig();
+            } else {
+                notificationConfigs[type] = {
+                    webhook_url: document.getElementById('webhookURL').value.trim(),
+                    secret: document.getElementById('webhookSecret').value.trim()
+                };
+            }
         }
 
         // 从缓存加载指定类型的配置到表单
         function loadTypeFromCache(type) {
-            const config = notificationConfigs[type];
-            document.getElementById('webhookURL').value = config.webhook_url || '';
-            document.getElementById('webhookSecret').value = config.secret || '';
+            if (type === 'email') {
+                setEmailFormConfig(notificationConfigs.email);
+            } else {
+                const config = notificationConfigs[type] || {};
+                document.getElementById('webhookURL').value = config.webhook_url || '';
+                document.getElementById('webhookSecret').value = config.secret || '';
+            }
         }
 
         async function loadNotificationConfig() {
@@ -1399,17 +1468,21 @@
                             secret: config.dingtalk.secret || ''
                         };
                     }
-                    
-                    // 显示当前类型的配置
-                    loadTypeFromCache(currentNotificationType);
-
-                    // 根据类型显示/隐藏签名密钥字段
-                    const secretGroup = document.getElementById('secretGroup');
-                    if (currentNotificationType === 'dingtalk') {
-                        secretGroup.style.display = 'block';
-                    } else {
-                        secretGroup.style.display = 'none';
+                    if (config.email) {
+                        notificationConfigs.email = {
+                            smtp_host: config.email.smtp_host || '',
+                            smtp_port: config.email.smtp_port || '',
+                            encryption: config.email.encryption || 'none',
+                            username: config.email.username || '',
+                            password: config.email.password || '',
+                            from: config.email.from || '',
+                            to: config.email.to || ''
+                        };
                     }
+
+                    // 显示当前类型的配置和对应字段
+                    loadTypeFromCache(currentNotificationType);
+                    updateNotificationFields(currentNotificationType);
                 }
             } catch (error) {
                 console.error('加载通知配置失败:', error);
@@ -1423,18 +1496,29 @@
             const testResult = document.getElementById('testResult');
 
             // 获取当前表单配置
-            const config = {
-                type: document.getElementById('notificationType').value,
-                webhook_url: document.getElementById('webhookURL').value.trim(),
-                secret: document.getElementById('webhookSecret').value.trim()
-            };
-
-            // 验证
-            if (!config.webhook_url) {
-                testResult.style.display = 'block';
-                testResult.className = 'test-result error';
-                testResult.textContent = '请先填写Webhook URL';
-                return;
+            const type = document.getElementById('notificationType').value;
+            let config;
+            if (type === 'email') {
+                const email = getEmailFormConfig();
+                if (!email.smtp_host || !email.from || !email.to) {
+                    testResult.style.display = 'block';
+                    testResult.className = 'test-result error';
+                    testResult.textContent = '请先填写 SMTP 服务器、发件人和收件人';
+                    return;
+                }
+                config = { type: 'email', email: email };
+            } else {
+                config = {
+                    type: type,
+                    webhook_url: document.getElementById('webhookURL').value.trim(),
+                    secret: document.getElementById('webhookSecret').value.trim()
+                };
+                if (!config.webhook_url) {
+                    testResult.style.display = 'block';
+                    testResult.className = 'test-result error';
+                    testResult.textContent = '请先填写Webhook URL';
+                    return;
+                }
             }
 
             // 显示测试中状态
@@ -1448,7 +1532,9 @@
                 const result = await window.remoteAudit.testNotification(config);
                 if (result && result.success) {
                     testResult.className = 'test-result success';
-                    testResult.textContent = '✓ 测试通知发送成功！请检查您的飞书/钉钉是否收到消息。';
+                    testResult.textContent = (type === 'email')
+                        ? '✓ 测试邮件发送成功！请检查收件箱（含垃圾邮件）。'
+                        : '✓ 测试通知发送成功！请检查您的飞书/钉钉是否收到消息。';
                 } else {
                     testResult.className = 'test-result error';
                     testResult.textContent = '✗ 测试失败: ' + (result?.error || '未知错误');
@@ -1465,17 +1551,27 @@
         async function saveNotificationConfig() {
             if (!window.remoteAudit) return;
 
-            const config = {
-                enabled: document.getElementById('notificationEnabled').checked,
-                type: document.getElementById('notificationType').value,
-                webhook_url: document.getElementById('webhookURL').value.trim(),
-                secret: document.getElementById('webhookSecret').value.trim()
-            };
-
-            // 验证
-            if (config.enabled && !config.webhook_url) {
-                alert('请填写Webhook URL');
-                return;
+            const enabled = document.getElementById('notificationEnabled').checked;
+            const type = document.getElementById('notificationType').value;
+            let config;
+            if (type === 'email') {
+                const email = getEmailFormConfig();
+                if (enabled && (!email.smtp_host || !email.from || !email.to)) {
+                    alert('请填写 SMTP 服务器、发件人和收件人');
+                    return;
+                }
+                config = { enabled: enabled, type: type, email: email };
+            } else {
+                config = {
+                    enabled: enabled,
+                    type: type,
+                    webhook_url: document.getElementById('webhookURL').value.trim(),
+                    secret: document.getElementById('webhookSecret').value.trim()
+                };
+                if (enabled && !config.webhook_url) {
+                    alert('请填写Webhook URL');
+                    return;
+                }
             }
 
             try {

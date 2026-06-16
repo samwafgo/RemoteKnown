@@ -271,10 +271,11 @@ func (s *Server) handleNotification(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		// 保存通知配置
 		var newConfig struct {
-			Enabled    bool   `json:"enabled"`
-			Type       string `json:"type"`
-			WebhookURL string `json:"webhook_url"`
-			Secret     string `json:"secret"`
+			Enabled    bool                   `json:"enabled"`
+			Type       string                 `json:"type"`
+			WebhookURL string                 `json:"webhook_url"`
+			Secret     string                 `json:"secret"`
+			Email      map[string]interface{} `json:"email"`
 		}
 
 		if err := json.NewDecoder(r.Body).Decode(&newConfig); err != nil {
@@ -299,12 +300,17 @@ func (s *Server) handleNotification(w http.ResponseWriter, r *http.Request) {
 		allConfigs["enabled"] = newConfig.Enabled
 		allConfigs["type"] = newConfig.Type
 
-		// 更新对应类型的具体配置
-		typeConfig := map[string]interface{}{
-			"webhook_url": newConfig.WebhookURL,
-			"secret":      newConfig.Secret,
+		// 更新对应类型的具体配置：邮件存到 email 子项，飞书/钉钉存 webhook_url+secret
+		if newConfig.Type == "email" {
+			if newConfig.Email != nil {
+				allConfigs["email"] = newConfig.Email
+			}
+		} else {
+			allConfigs[newConfig.Type] = map[string]interface{}{
+				"webhook_url": newConfig.WebhookURL,
+				"secret":      newConfig.Secret,
+			}
 		}
-		allConfigs[newConfig.Type] = typeConfig
 
 		// 保存完整配置
 		configJSON, err := json.Marshal(allConfigs)
@@ -336,9 +342,10 @@ func (s *Server) handleTestNotification(w http.ResponseWriter, r *http.Request) 
 	}
 
 	var req struct {
-		Type       string `json:"type"`
-		WebhookURL string `json:"webhook_url"`
-		Secret     string `json:"secret"`
+		Type       string               `json:"type"`
+		WebhookURL string               `json:"webhook_url"`
+		Secret     string               `json:"secret"`
+		Email      notifier.EmailConfig `json:"email"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -346,7 +353,13 @@ func (s *Server) handleTestNotification(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if req.WebhookURL == "" {
+	// 按类型校验必填项
+	if req.Type == "email" {
+		if req.Email.SMTPHost == "" || req.Email.From == "" || req.Email.To == "" {
+			http.Error(w, "请填写 SMTP 服务器、发件人和收件人", http.StatusBadRequest)
+			return
+		}
+	} else if req.WebhookURL == "" {
 		http.Error(w, "Webhook URL不能为空", http.StatusBadRequest)
 		return
 	}
@@ -355,6 +368,7 @@ func (s *Server) handleTestNotification(w http.ResponseWriter, r *http.Request) 
 		Type:       req.Type,
 		WebhookURL: req.WebhookURL,
 		Secret:     req.Secret,
+		Email:      req.Email,
 		Enabled:    true,
 	}
 

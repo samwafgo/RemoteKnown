@@ -357,30 +357,34 @@ func (n *Notifier) sendEmailNotification(config NotificationConfig, title, conte
 		}
 	}
 
-	// 认证（可选）：填了用户名才认证，内网匿名发送可留空
+	// 认证（可选）：填了用户名才认证，内网匿名发送可留空。
+	// 按服务器实际通告的机制选择 PLAIN / LOGIN / CRAM-MD5（不少内网/Exchange 服务器只支持 LOGIN，
+	// 强行 AUTH PLAIN 会得到 "504 Authentication mechanism not supported"）。
+	// 内网明文服务器若未通告可用机制，则跳过认证直接尝试匿名投递。
 	authenticated := false
 	if e.Username != "" {
-		if ok, _ := client.Extension("AUTH"); ok {
-			var auth smtp.Auth
-			if _, isTLS := client.TLSConnectionState(); isTLS {
-				auth = smtp.PlainAuth("", e.Username, e.Password, e.SMTPHost)
-			} else {
-				// 明文连接下标准库 PlainAuth 会拒绝发送凭据，使用自定义实现以支持内网明文认证
-				auth = &plainAuthNoTLS{username: e.Username, password: e.Password}
-			}
+		authOK, mechs := client.Extension("AUTH")
+		_, isTLS := client.TLSConnectionState()
+		auth := chooseSMTPAuth(mechs, e, isTLS)
+		switch {
+		case authOK && auth != nil:
 			if err := client.Auth(auth); err != nil {
 				return fmt.Errorf("SMTP 认证失败（请检查用户名/密码；QQ/163/Gmail 等公网邮箱密码必须用“授权码”而非登录密码）: %w", err)
 			}
 			authenticated = true
-		} else {
-			return fmt.Errorf("服务器未提供 AUTH 认证，通常是因为连接未加密。公网邮箱请把“加密方式”改为 SSL(465) 或 STARTTLS(587) 后重试")
+		case isTLS:
+			// 加密连接却拿不到可用 AUTH 机制，通常是服务器/配置问题
+			return fmt.Errorf("服务器未提供可用的 AUTH 认证机制（通告: %q）。公网邮箱请确认加密方式为 SSL(465) 或 STARTTLS(587)", mechs)
+		default:
+			// 内网明文：服务器未通告可用 AUTH 机制，跳过认证直接尝试匿名投递（内网中继常见）
+			log.Printf("[通知器] 服务器未通告可用 AUTH 机制(%q)，跳过认证尝试匿名发送", mechs)
 		}
 	}
 
 	if err := client.Mail(e.From); err != nil {
 		// 多数公网邮箱要求先登录才能发信（如 503 need AUTH first）
 		if !authenticated {
-			return fmt.Errorf("设置发件人失败，服务器很可能要求先登录认证。请填写用户名/密码，并将加密方式选为 SSL 或 STARTTLS（公网邮箱密码用“授权码”）: %w", err)
+			return fmt.Errorf("设置发件人失败，服务器要求先通过认证。请确认用户名/密码正确；公网邮箱需将加密方式选为 SSL(465) 或 STARTTLS(587) 并使用“授权码”: %w", err)
 		}
 		return fmt.Errorf("设置发件人失败: %w", err)
 	}
@@ -470,6 +474,27 @@ func parseRecipients(s string) []string {
 	return out
 }
 
+// chooseSMTPAuth 根据服务器 EHLO 通告的认证机制(mechs，如 "LOGIN PLAIN")挑选合适的认证方式。
+// 明文连接使用不校验 TLS 的自定义实现（内网无加密服务器）。无可用机制时返回 nil。
+func chooseSMTPAuth(mechs string, e EmailConfig, isTLS bool) smtp.Auth {
+	m := strings.ToUpper(mechs)
+	switch {
+	case strings.Contains(m, "PLAIN"):
+		if isTLS {
+			return smtp.PlainAuth("", e.Username, e.Password, e.SMTPHost)
+		}
+		// 明文连接下标准库 PlainAuth 会拒绝发送凭据，使用自定义实现以支持内网明文认证
+		return &plainAuthNoTLS{username: e.Username, password: e.Password}
+	case strings.Contains(m, "LOGIN"):
+		// 标准库不支持 LOGIN 机制，自行实现（内网/Exchange 常见）
+		return &loginAuth{username: e.Username, password: e.Password}
+	case strings.Contains(m, "CRAM-MD5"):
+		return smtp.CRAMMD5Auth(e.Username, e.Password)
+	default:
+		return nil
+	}
+}
+
 // plainAuthNoTLS 是不校验 TLS 的 PLAIN 认证实现。
 // 标准库 smtp.PlainAuth 会拒绝在明文（非 TLS、非 localhost）连接上发送凭据，
 // 内网无加密 SMTP 服务器需要认证时用它绕过该限制。
@@ -486,6 +511,33 @@ func (a *plainAuthNoTLS) Next(_ []byte, more bool) ([]byte, error) {
 		return nil, fmt.Errorf("意外的服务器认证质询")
 	}
 	return nil, nil
+}
+
+// loginAuth 实现 AUTH LOGIN 机制（标准库未内置）。
+// 服务器依次质询用户名、密码（base64），用步骤计数兜底不同服务器的质询文案差异。
+// 同样不校验 TLS，以支持内网明文服务器。
+type loginAuth struct {
+	username, password string
+	step               int
+}
+
+func (a *loginAuth) Start(_ *smtp.ServerInfo) (string, []byte, error) {
+	return "LOGIN", nil, nil
+}
+
+func (a *loginAuth) Next(_ []byte, more bool) ([]byte, error) {
+	if !more {
+		return nil, nil
+	}
+	a.step++
+	switch a.step {
+	case 1:
+		return []byte(a.username), nil
+	case 2:
+		return []byte(a.password), nil
+	default:
+		return nil, fmt.Errorf("意外的服务器认证质询")
+	}
 }
 
 // postWebhook 发送 webhook 请求

@@ -120,8 +120,19 @@ func IsNewer(remote, current string) bool {
 	return CompareVersions(remote, current) > 0
 }
 
+// atoiSafe 取字符串的前导数字部分，忽略预发布后缀（如 "7-beta" → 7、"beta" → 0）。
+// 这样 beta 版守护进程（如 1.0.7-beta.1）在 minAppVersion 门槛比较时按其基础版本 1.0.7 计，
+// 不会被要求 1.0.7 的规则误判为版本过低。
 func atoiSafe(s string) int {
-	v, err := strconv.Atoi(strings.TrimSpace(s))
+	s = strings.TrimSpace(s)
+	end := 0
+	for end < len(s) && s[end] >= '0' && s[end] <= '9' {
+		end++
+	}
+	if end == 0 {
+		return 0
+	}
+	v, err := strconv.Atoi(s[:end])
 	if err != nil {
 		return 0
 	}

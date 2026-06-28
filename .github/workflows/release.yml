@@ -52,6 +52,11 @@ jobs:
       uses: softprops/action-gh-release@v1
       if: startsWith(github.ref, 'refs/tags/')
       with:
+        # 含连字符的 tag 视为预发布（如 v1.0.7-beta.1）：标记为 Pre-release 且不设为 Latest，
+        # 正式 tag（如 v1.0.7）才标记 Latest。GitHub 的 /releases/latest 会自动跳过预发布，
+        # 因此 App 内的“检查更新”不会把 beta 推送给用户。
+        prerelease: ${{ contains(github.ref_name, '-') }}
+        make_latest: ${{ !contains(github.ref_name, '-') }}
         # Upload the installer exe found in web/dist
         files: |
           web/dist/*.exe

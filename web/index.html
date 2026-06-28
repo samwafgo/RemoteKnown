@@ -1498,25 +1498,29 @@
 
         // 语义化版本比较函数
         function compareVersions(v1, v2) {
-            // 移除前缀 v
-            v1 = v1.replace(/^v/, '');
-            v2 = v2.replace(/^v/, '');
-
-            // 分割版本号
-            const parts1 = v1.split('.').map(n => parseInt(n) || 0);
-            const parts2 = v2.split('.').map(n => parseInt(n) || 0);
-
-            // 补齐长度
-            const maxLen = Math.max(parts1.length, parts2.length);
-            while (parts1.length < maxLen) parts1.push(0);
-            while (parts2.length < maxLen) parts2.push(0);
-
-            // 逐段比较
-            for (let i = 0; i < maxLen; i++) {
-                if (parts1[i] > parts2[i]) return 1;   // v1 > v2
-                if (parts1[i] < parts2[i]) return -1;  // v1 < v2
+            // 解析为 { base:[数字...], pre:预发布串 }。预发布(如 1.0.7-beta.1)语义上低于同版本正式版。
+            function parse(v) {
+                v = String(v).replace(/^v/, '').trim();
+                const dash = v.indexOf('-');
+                const baseStr = dash === -1 ? v : v.slice(0, dash);
+                const pre = dash === -1 ? '' : v.slice(dash + 1);
+                return { base: baseStr.split('.').map(n => parseInt(n, 10) || 0), pre };
             }
-            return 0; // v1 == v2
+            const a = parse(v1), b = parse(v2);
+
+            // 先比较主版本号（数字段）
+            const maxLen = Math.max(a.base.length, b.base.length);
+            for (let i = 0; i < maxLen; i++) {
+                const x = a.base[i] || 0, y = b.base[i] || 0;
+                if (x > y) return 1;   // v1 > v2
+                if (x < y) return -1;  // v1 < v2
+            }
+
+            // 主版本相同：无预发布后缀的为正式版，高于预发布版
+            if (a.pre === b.pre) return 0;
+            if (a.pre === '') return 1;   // v1 是正式版，更高
+            if (b.pre === '') return -1;  // v2 是正式版，更高
+            return a.pre < b.pre ? -1 : 1; // 都是预发布，按字符串比较 (beta.1 < beta.2)
         }
 
         async function checkUpdate() {

@@ -119,10 +119,15 @@ func (d *Detector) applyActiveRules() error {
 	if err != nil {
 		return fmt.Errorf("解析规则 JSON 失败: %w", err)
 	}
+
+	// 叠加用户层：追加自定义工具（按进程名去重）、过滤用户取消关注的工具。
+	// 用户层独立于版本化规则集存储，确保 GitHub 规则更新不会覆盖用户数据。
+	rules = d.mergeUserOverlay(rules)
+
 	d.windowsMu.Lock()
 	d.windows.SetRules(rules)
 	d.windowsMu.Unlock()
-	log.Printf("[检测器] 已载入检测规则 v%s（%d 条，来源:%s）", active.Version, len(rules), active.Source)
+	log.Printf("[检测器] 已载入检测规则 v%s（合并后 %d 条，来源:%s）", active.Version, len(rules), active.Source)
 	return nil
 }
 

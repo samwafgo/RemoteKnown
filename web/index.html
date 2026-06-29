@@ -639,6 +639,107 @@
         .modal-body {
             padding: 0;
         }
+
+        /* 监控对象列表与候选卡片 */
+        .tool-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 10px;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            margin-bottom: 6px;
+            background: #fff;
+        }
+
+        .tool-icon {
+            width: 28px;
+            height: 28px;
+            border-radius: 5px;
+            object-fit: contain;
+            flex-shrink: 0;
+        }
+
+        .tool-icon-fallback {
+            width: 28px;
+            height: 28px;
+            border-radius: 5px;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #e0e7ff;
+            color: #4338ca;
+            font-weight: 600;
+            font-size: 13px;
+        }
+
+        .tool-meta {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .tool-name {
+            font-size: 13px;
+            color: #1f2937;
+            font-weight: 500;
+        }
+
+        .tool-proc {
+            font-size: 11px;
+            color: #888;
+            word-break: break-all;
+        }
+
+        .tool-badge {
+            display: inline-block;
+            font-size: 10px;
+            padding: 1px 6px;
+            border-radius: 8px;
+            background: #eef2ff;
+            color: #4338ca;
+            margin-left: 6px;
+        }
+
+        .candidate-card {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 10px;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            margin-bottom: 6px;
+            background: #fff;
+            cursor: pointer;
+            transition: all .15s;
+        }
+
+        .candidate-card:hover {
+            border-color: #3b82f6;
+            background: #f8fbff;
+        }
+
+        .candidate-card.selected {
+            border-color: #3b82f6;
+            background: #eff6ff;
+        }
+
+        .change-tag {
+            font-size: 10px;
+            padding: 1px 6px;
+            border-radius: 8px;
+            white-space: nowrap;
+        }
+
+        .change-tag.new {
+            background: #dcfce7;
+            color: #166534;
+        }
+
+        .change-tag.conn {
+            background: #fef3c7;
+            color: #92400e;
+        }
     </style>
 </head>
 
@@ -673,6 +774,7 @@
                 <div class="settings-sidebar">
                     <button class="tab-btn active" onclick="switchTab('notification')"><span class="tab-icon">🔔</span>通知</button>
                     <button class="tab-btn" onclick="switchTab('general')"><span class="tab-icon">⚙️</span>通用</button>
+                    <button class="tab-btn" onclick="switchTab('tools')"><span class="tab-icon">🖥️</span>监控对象</button>
                     <button class="tab-btn" onclick="switchTab('feedback')"><span class="tab-icon">💬</span>反馈</button>
                     <button class="tab-btn" onclick="switchTab('about')"><span class="tab-icon">ℹ️</span>关于</button>
                 </div>
@@ -787,6 +889,82 @@
                                     onclick="saveNotificationConfig()">保存配置</button>
                             </div>
                         </form>
+                    </div>
+
+                    <!-- 监控对象 Tab -->
+                    <div id="tab-tools" class="tab-pane">
+                        <p style="margin: 0 0 12px 0; font-size: 12px; color: #666;">
+                            勾选要关注的远程工具；若你的远程软件不在列表里，点「添加远程工具」用快照录制自动识别。
+                        </p>
+
+                        <!-- 工具列表 -->
+                        <div id="toolsList"></div>
+
+                        <!-- 添加入口 -->
+                        <div style="margin-top: 12px;">
+                            <button type="button" class="btn btn-primary" onclick="startRecording()">＋ 添加远程工具</button>
+                        </div>
+
+                        <!-- 录制向导 -->
+                        <div id="recordWizard" style="display:none; margin-top:16px; padding:16px; background:#f9fafb; border:1px solid #e5e7eb; border-radius:8px;">
+                            <!-- 第一步 -->
+                            <div id="recordStep1">
+                                <h4 style="margin:0 0 8px 0; font-size:14px; color:#1f2937;">第 1 步 · 记录基线</h4>
+                                <p style="font-size:13px; color:#555; margin:0 0 12px 0;">
+                                    请确保<strong>现在没有人正在远程你</strong>，然后点击下面的按钮记录当前进程基线。
+                                </p>
+                                <button type="button" class="btn btn-primary" onclick="doSnapshot()">开始录制（记录基线）</button>
+                                <button type="button" class="btn btn-secondary" onclick="resetRecordWizard()">取消</button>
+                            </div>
+
+                            <!-- 第二步 -->
+                            <div id="recordStep2" style="display:none;">
+                                <h4 style="margin:0 0 8px 0; font-size:14px; color:#1f2937;">第 2 步 · 触发远程</h4>
+                                <p style="font-size:13px; color:#555; margin:0 0 12px 0;">
+                                    基线已记录（<span id="baselineCount">0</span> 个进程）。<br>
+                                    现在请<strong>打开并连接</strong>那个远程软件，连上后回到这里点「完成对比」。
+                                </p>
+                                <button type="button" class="btn btn-primary" onclick="doDiff()">完成对比</button>
+                                <button type="button" class="btn btn-secondary" onclick="resetRecordWizard()">取消</button>
+                            </div>
+
+                            <!-- 第三步 -->
+                            <div id="recordStep3" style="display:none;">
+                                <h4 style="margin:0 0 8px 0; font-size:14px; color:#1f2937;">第 3 步 · 选择远程工具</h4>
+                                <p style="font-size:13px; color:#555; margin:0 0 12px 0;">
+                                    对比后这些进程是新出现的或连接数突增的，请选出那个远程工具：
+                                </p>
+                                <div id="candidateList"></div>
+                                <div id="candidateForm" style="display:none;"></div>
+                            </div>
+                        </div>
+
+                        <!-- 高级：手动文本编辑规则（内置 + 自定义） -->
+                        <details style="margin-top:16px;">
+                            <summary style="cursor:pointer; font-size:13px; color:#4338ca;">高级 · 手动编辑规则 (JSON)</summary>
+                            <div style="margin-top:10px;">
+                                <p style="font-size:11px; color:#888; margin:0 0 6px 0;">
+                                    直接编辑全部规则（含内置）。可用字段：
+                                    <code>processName</code>(必填) · <code>toolName</code> · <code>commandLineArgs</code>[] ·
+                                    <code>detectChildProcess</code> · <code>childProcessExcludeArgs</code>[] ·
+                                    <code>windowClass</code> · <code>windowTitle</code> ·
+                                    <code>tcpConnThreshold</code> · <code>useEstablishedOnly</code> · <code>udpConnThreshold</code>
+                                </p>
+                                <p style="font-size:11px; color:#9a6a00; background:#fff7ed; border:1px solid #fed7aa; border-radius:4px; padding:6px 8px; margin:0 0 8px 0;">
+                                    内置规则的改动会被保留、且不会被规则更新覆盖；删除内置规则行只会恢复其默认（如需停用请用上方「关注」开关），删除自定义工具行即彻底删除。
+                                </p>
+                                <textarea id="customRulesJson" spellcheck="false"
+                                    style="width:100%; min-height:180px; font-family:Consolas,Monaco,monospace; font-size:12px; line-height:1.5; border:1px solid #d1d5db; border-radius:6px; padding:8px; box-sizing:border-box;"></textarea>
+                                <div id="customRulesMsg" style="font-size:12px; margin-top:6px; display:none;"></div>
+                                <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
+                                    <button type="button" class="btn btn-secondary" onclick="resetBuiltinRules()">恢复内置默认</button>
+                                    <div>
+                                        <button type="button" class="btn btn-secondary" onclick="loadCustomRaw()">重置编辑</button>
+                                        <button type="button" class="btn btn-primary" onclick="saveCustomRaw()">保存规则</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </details>
                     </div>
 
                     <!-- 反馈 Tab -->
@@ -1201,6 +1379,10 @@
                 autoCheckRulesUpdate();
             } else if (tabName === 'notification') {
                 loadNotificationConfig();
+            } else if (tabName === 'tools') {
+                resetRecordWizard();
+                loadTools();
+                loadCustomRaw();
             }
         }
 
@@ -1244,6 +1426,298 @@
         function closeSettingsModal() {
             const modal = document.getElementById('settingsModal');
             modal.style.display = 'none';
+        }
+
+        // ===== 监控对象（图标化工具选择 + 快照录制生成规则）=====
+
+        function toolsEscape(s) {
+            return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+            }[c]));
+        }
+
+        function toolIconHtml(iconDataURI, name) {
+            if (iconDataURI) {
+                return `<img class="tool-icon" src="${toolsEscape(iconDataURI)}" alt="">`;
+            }
+            const letter = (name || '?').trim().charAt(0).toUpperCase();
+            return `<div class="tool-icon-fallback">${toolsEscape(letter)}</div>`;
+        }
+
+        async function loadTools() {
+            const container = document.getElementById('toolsList');
+            if (!window.remoteAudit || !container) return;
+            container.innerHTML = '<span style="font-size:12px;color:#9ca3af;">加载中…</span>';
+            try {
+                const res = await window.remoteAudit.toolsList();
+                const tools = (res && res.tools) || [];
+                if (tools.length === 0) {
+                    container.innerHTML = '<span style="font-size:12px;color:#9ca3af;">暂无工具</span>';
+                    return;
+                }
+                container.innerHTML = tools.map(t => {
+                    const pn = toolsEscape(t.processName);
+                    const badge = t.source === 'custom'
+                        ? '<span class="tool-badge">自定义</span>'
+                        : '';
+                    const del = t.source === 'custom'
+                        ? `<a class="action-link" href="#" onclick="removeCustomTool('${pn}');return false;">删除</a>`
+                        : '';
+                    return `
+                        <div class="tool-row">
+                            ${toolIconHtml(t.iconDataURI, t.toolName)}
+                            <div class="tool-meta">
+                                <div class="tool-name">${toolsEscape(t.toolName)}${badge}</div>
+                                <div class="tool-proc">${pn}</div>
+                            </div>
+                            ${del}
+                            <label class="switch-label" style="display:flex;align-items:center;gap:4px;">
+                                <input type="checkbox" ${t.enabled ? 'checked' : ''}
+                                    onchange="toggleTool('${pn}', this.checked)">
+                                <span style="font-size:12px;color:#666;">关注</span>
+                            </label>
+                        </div>`;
+                }).join('');
+            } catch (e) {
+                container.innerHTML = `<span style="font-size:12px;color:#dc2626;">加载失败：${toolsEscape(e.message)}</span>`;
+            }
+        }
+
+        async function toggleTool(processName, enabled) {
+            if (!window.remoteAudit) return;
+            try {
+                await window.remoteAudit.toolsToggle(processName, enabled);
+            } catch (e) {
+                alert('更新失败：' + e.message);
+                loadTools();
+            }
+        }
+
+        async function removeCustomTool(processName) {
+            if (!window.remoteAudit) return;
+            if (!confirm('确定删除自定义工具 ' + processName + ' 吗？')) return;
+            try {
+                await window.remoteAudit.toolsRemoveCustom(processName);
+                loadTools();
+            } catch (e) {
+                alert('删除失败：' + e.message);
+            }
+        }
+
+        // ----- 录制向导 -----
+
+        function showRecordStep(step) {
+            document.getElementById('recordStep1').style.display = step === 1 ? 'block' : 'none';
+            document.getElementById('recordStep2').style.display = step === 2 ? 'block' : 'none';
+            document.getElementById('recordStep3').style.display = step === 3 ? 'block' : 'none';
+        }
+
+        function resetRecordWizard() {
+            const wiz = document.getElementById('recordWizard');
+            if (wiz) wiz.style.display = 'none';
+            const cf = document.getElementById('candidateForm');
+            if (cf) { cf.style.display = 'none'; cf.innerHTML = ''; }
+            const cl = document.getElementById('candidateList');
+            if (cl) cl.innerHTML = '';
+            showRecordStep(1);
+        }
+
+        function startRecording() {
+            document.getElementById('recordWizard').style.display = 'block';
+            showRecordStep(1);
+        }
+
+        async function doSnapshot() {
+            if (!window.remoteAudit) return;
+            try {
+                const res = await window.remoteAudit.toolsSnapshot();
+                document.getElementById('baselineCount').textContent = (res && res.count) || 0;
+                showRecordStep(2);
+            } catch (e) {
+                alert('记录基线失败：' + e.message);
+            }
+        }
+
+        async function doDiff() {
+            if (!window.remoteAudit) return;
+            const list = document.getElementById('candidateList');
+            list.innerHTML = '<span style="font-size:12px;color:#9ca3af;">对比中…</span>';
+            document.getElementById('candidateForm').style.display = 'none';
+            showRecordStep(3);
+            try {
+                const res = await window.remoteAudit.toolsDiff();
+                const cands = (res && res.candidates) || [];
+                if (cands.length === 0) {
+                    list.innerHTML = '<span style="font-size:12px;color:#9ca3af;">没检测到新进程或连接变化。请确认远程已连上，再重试一次。</span>';
+                    return;
+                }
+                window._candidates = cands;
+                list.innerHTML = cands.map((c, i) => {
+                    let tag = '';
+                    if (c.changeKind === 'new') {
+                        tag = '<span class="change-tag new">新进程</span>';
+                    } else {
+                        const parts = [];
+                        if (c.tcpDelta > 0) parts.push('TCP +' + c.tcpDelta);
+                        if (c.udpDelta > 0) parts.push('UDP +' + c.udpDelta);
+                        tag = `<span class="change-tag conn">${parts.join(' / ') || '连接变化'}</span>`;
+                    }
+                    return `
+                        <div class="candidate-card" id="cand-${i}" onclick="selectCandidate(${i})">
+                            ${toolIconHtml(c.iconDataURI, c.processName)}
+                            <div class="tool-meta">
+                                <div class="tool-name">${toolsEscape(c.processName)}</div>
+                                <div class="tool-proc">${toolsEscape(c.exePath || '')}</div>
+                            </div>
+                            ${tag}
+                        </div>`;
+                }).join('');
+            } catch (e) {
+                list.innerHTML = `<span style="font-size:12px;color:#dc2626;">对比失败：${toolsEscape(e.message)}</span>`;
+            }
+        }
+
+        function selectCandidate(i) {
+            const c = (window._candidates || [])[i];
+            if (!c) return;
+            document.querySelectorAll('.candidate-card').forEach(el => el.classList.remove('selected'));
+            const card = document.getElementById('cand-' + i);
+            if (card) card.classList.add('selected');
+
+            // 以进程为锚点，预填可延展的检测维度（用户可勾选启用哪些）
+            const hasCmd = !!(c.cmdline && c.cmdline.trim());
+            const form = document.getElementById('candidateForm');
+            form.style.display = 'block';
+            form.innerHTML = `
+                <div style="margin-top:12px;padding-top:12px;border-top:1px dashed #e5e7eb;">
+                    <div class="form-group">
+                        <label>工具名称</label>
+                        <input type="text" id="ctName" value="${toolsEscape(c.processName.replace(/\.exe$/i, ''))}">
+                    </div>
+                    <div class="form-group">
+                        <label>进程名（锚点，不可改）</label>
+                        <input type="text" value="${toolsEscape(c.processName)}" disabled>
+                    </div>
+                    <div class="form-group">
+                        <label style="display:flex;align-items:center;gap:6px;font-weight:normal;">
+                            <input type="checkbox" id="ctUseTcp" ${c.tcpDelta > 0 ? 'checked' : ''}>
+                            TCP 连接数达到阈值即判定远程
+                        </label>
+                        <input type="number" id="ctTcp" value="${c.tcpDelta > 0 ? c.tcpDelta : ''}" min="1"
+                            placeholder="连接数阈值" style="margin-top:4px;">
+                    </div>
+                    <div class="form-group">
+                        <label style="display:flex;align-items:center;gap:6px;font-weight:normal;">
+                            <input type="checkbox" id="ctUseUdp" ${c.udpDelta > 0 ? 'checked' : ''}>
+                            UDP 连接数超过阈值即判定远程
+                        </label>
+                        <input type="number" id="ctUdp" value="${c.udpDelta > 0 ? c.udpDelta : ''}" min="0"
+                            placeholder="连接数阈值" style="margin-top:4px;">
+                    </div>
+                    <div class="form-group">
+                        <label style="display:flex;align-items:center;gap:6px;font-weight:normal;">
+                            <input type="checkbox" id="ctUseTitle" ${c.windowTitle ? '' : 'disabled'}>
+                            出现指定标题的窗口即判定远程
+                        </label>
+                        <input type="text" id="ctTitle" value="${toolsEscape(c.windowTitle || '')}"
+                            placeholder="窗口标题（包含匹配）" style="margin-top:4px;">
+                    </div>
+                    <p style="font-size:11px;color:#888;margin:0 0 10px 0;">
+                        ${hasCmd ? '命令行：' + toolsEscape(c.cmdline) : '不勾选任何维度时，只要该进程在运行即判定为远程。'}
+                    </p>
+                    <div style="text-align:right;">
+                        <button type="button" class="btn btn-secondary" onclick="resetRecordWizard()">取消</button>
+                        <button type="button" class="btn btn-primary" onclick="saveCustomTool()">保存为监控规则</button>
+                    </div>
+                </div>`;
+            window._selectedCandidate = c;
+        }
+
+        async function saveCustomTool() {
+            const c = window._selectedCandidate;
+            if (!c || !window.remoteAudit) return;
+            const tool = { processName: c.processName, toolName: document.getElementById('ctName').value.trim() || c.processName };
+
+            if (document.getElementById('ctUseTcp').checked) {
+                const v = parseInt(document.getElementById('ctTcp').value, 10);
+                if (v > 0) { tool.tcpConnThreshold = v; tool.useEstablishedOnly = true; }
+            }
+            if (document.getElementById('ctUseUdp').checked) {
+                const v = parseInt(document.getElementById('ctUdp').value, 10);
+                if (!isNaN(v) && v >= 0) tool.udpConnThreshold = v;
+            }
+            const titleEl = document.getElementById('ctUseTitle');
+            if (titleEl && titleEl.checked) {
+                const t = document.getElementById('ctTitle').value.trim();
+                if (t) tool.windowTitle = t;
+            }
+
+            try {
+                await window.remoteAudit.toolsAddCustom(tool);
+                resetRecordWizard();
+                loadTools();
+            } catch (e) {
+                alert('保存失败：' + e.message);
+            }
+        }
+
+        // ----- 高级：手动文本编辑规则 -----
+
+        async function loadCustomRaw() {
+            const ta = document.getElementById('customRulesJson');
+            const msg = document.getElementById('customRulesMsg');
+            if (!window.remoteAudit || !ta) return;
+            if (msg) msg.style.display = 'none';
+            try {
+                const res = await window.remoteAudit.toolsGetRulesRaw();
+                ta.value = (res && res.json) || '[]';
+            } catch (e) {
+                ta.value = '[]';
+            }
+        }
+
+        async function resetBuiltinRules() {
+            if (!window.remoteAudit) return;
+            if (!confirm('确定把所有内置规则恢复为默认吗？（不影响你的自定义工具）')) return;
+            try {
+                const res = await window.remoteAudit.toolsResetBuiltin();
+                showCustomRulesMsg((res && res.message) || '已恢复内置默认', true);
+                loadCustomRaw();
+                loadTools();
+            } catch (e) {
+                showCustomRulesMsg('恢复失败：' + e.message, false);
+            }
+        }
+
+        function showCustomRulesMsg(text, ok) {
+            const msg = document.getElementById('customRulesMsg');
+            if (!msg) return;
+            msg.style.display = 'block';
+            msg.textContent = text;
+            msg.style.color = ok ? '#166534' : '#dc2626';
+        }
+
+        async function saveCustomRaw() {
+            const ta = document.getElementById('customRulesJson');
+            if (!window.remoteAudit || !ta) return;
+            // 本地先校验 JSON，给出更友好的错误
+            try {
+                const parsed = JSON.parse(ta.value);
+                if (!Array.isArray(parsed)) {
+                    showCustomRulesMsg('最外层必须是数组 []', false);
+                    return;
+                }
+            } catch (e) {
+                showCustomRulesMsg('JSON 解析失败：' + e.message, false);
+                return;
+            }
+            try {
+                const res = await window.remoteAudit.toolsSetRulesRaw(ta.value);
+                showCustomRulesMsg((res && res.message) || '已保存', true);
+                loadTools();
+            } catch (e) {
+                showCustomRulesMsg('保存失败：' + e.message, false);
+            }
         }
 
         async function loadStartupConfig() {

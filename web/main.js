@@ -620,6 +620,43 @@ function setupIPC() {
         return await fetchAPIPost('/api/rules/upload', content);
     });
 
+    // 监控对象管理（图标化工具选择 + 快照录制生成规则）
+    ipcMain.handle('toolsList', async () => {
+        return await fetchAPI('/api/tools');
+    });
+
+    ipcMain.handle('toolsToggle', async (event, processName, enabled) => {
+        return await fetchAPIPost('/api/tools/toggle', { processName, enabled });
+    });
+
+    ipcMain.handle('toolsSnapshot', async () => {
+        return await fetchAPIPost('/api/tools/snapshot', {});
+    });
+
+    ipcMain.handle('toolsDiff', async () => {
+        return await fetchAPIPost('/api/tools/diff', {});
+    });
+
+    ipcMain.handle('toolsAddCustom', async (event, tool) => {
+        return await fetchAPIPost('/api/tools/custom', tool);
+    });
+
+    ipcMain.handle('toolsRemoveCustom', async (event, processName) => {
+        return await fetchAPIPost('/api/tools/custom/remove', { processName });
+    });
+
+    ipcMain.handle('toolsGetRulesRaw', async () => {
+        return await fetchAPI('/api/tools/rules');
+    });
+
+    ipcMain.handle('toolsSetRulesRaw', async (event, jsonText) => {
+        return await fetchAPIPost('/api/tools/rules', { json: jsonText });
+    });
+
+    ipcMain.handle('toolsResetBuiltin', async () => {
+        return await fetchAPIPost('/api/tools/rules/reset', {});
+    });
+
     ipcMain.handle('getAppVersion', () => {
         return app.getVersion();
     });

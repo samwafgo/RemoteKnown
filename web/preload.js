@@ -24,5 +24,15 @@ contextBridge.exposeInMainWorld('remoteAudit', {
     rulesCheck: () => ipcRenderer.invoke('rulesCheck'),
     rulesApply: () => ipcRenderer.invoke('rulesApply'),
     rulesRollback: (version) => ipcRenderer.invoke('rulesRollback', version),
-    rulesUpload: () => ipcRenderer.invoke('rulesUpload')
+    rulesUpload: () => ipcRenderer.invoke('rulesUpload'),
+    // 监控对象管理
+    toolsList: () => ipcRenderer.invoke('toolsList'),
+    toolsToggle: (processName, enabled) => ipcRenderer.invoke('toolsToggle', processName, enabled),
+    toolsSnapshot: () => ipcRenderer.invoke('toolsSnapshot'),
+    toolsDiff: () => ipcRenderer.invoke('toolsDiff'),
+    toolsAddCustom: (tool) => ipcRenderer.invoke('toolsAddCustom', tool),
+    toolsRemoveCustom: (processName) => ipcRenderer.invoke('toolsRemoveCustom', processName),
+    toolsGetRulesRaw: () => ipcRenderer.invoke('toolsGetRulesRaw'),
+    toolsSetRulesRaw: (jsonText) => ipcRenderer.invoke('toolsSetRulesRaw', jsonText),
+    toolsResetBuiltin: () => ipcRenderer.invoke('toolsResetBuiltin')
 });

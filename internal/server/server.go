@@ -32,6 +32,10 @@ type Server struct {
 	running  bool
 	clients  map[string]chan []byte
 	clientMu sync.RWMutex
+
+	// 录制新工具时的基线进程快照（POST /api/tools/snapshot 写入，/api/tools/diff 读取）
+	snapBaseline map[int32]detector.ProcSnap
+	snapMu       sync.Mutex
 }
 
 type StatusResponse struct {
@@ -65,6 +69,14 @@ func (s *Server) Start() error {
 	http.HandleFunc("/api/rules/apply", s.handleRulesApply)
 	http.HandleFunc("/api/rules/upload", s.handleRulesUpload)
 	http.HandleFunc("/api/rules/rollback", s.handleRulesRollback)
+	http.HandleFunc("/api/tools", s.handleToolsList)
+	http.HandleFunc("/api/tools/toggle", s.handleToolsToggle)
+	http.HandleFunc("/api/tools/snapshot", s.handleToolsSnapshot)
+	http.HandleFunc("/api/tools/diff", s.handleToolsDiff)
+	http.HandleFunc("/api/tools/custom", s.handleToolsCustom)
+	http.HandleFunc("/api/tools/custom/remove", s.handleToolsCustomRemove)
+	http.HandleFunc("/api/tools/rules", s.handleToolsRulesRaw)
+	http.HandleFunc("/api/tools/rules/reset", s.handleToolsRulesReset)
 	http.HandleFunc("/health", s.handleHealth)
 
 	s.running = true
@@ -739,6 +751,218 @@ func (s *Server) handleRulesRollback(w http.ResponseWriter, r *http.Request) {
 		"success": true,
 		"message": "已回滚到 v" + req.Version,
 		"version": req.Version,
+	})
+}
+
+// handleToolsList 返回监控清单（官方 + 自定义工具），每条含来源、是否启用与图标（进程运行时）。
+func (s *Server) handleToolsList(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	tools, err := s.detector.ListMonitoredTools()
+	if err != nil {
+		writeJSONError(w, "获取监控工具列表失败", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"tools":   tools,
+	})
+}
+
+// handleToolsToggle 设置某工具是否被监控。
+func (s *Server) handleToolsToggle(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		ProcessName string `json:"processName"`
+		Enabled     bool   `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ProcessName == "" {
+		writeJSONError(w, "请指定工具进程名", http.StatusBadRequest)
+		return
+	}
+	if err := s.detector.SetToolEnabled(req.ProcessName, req.Enabled); err != nil {
+		writeJSONError(w, "更新监控状态失败", http.StatusInternalServerError)
+		return
+	}
+	log.Printf("[监控工具] %s 监控状态=%v", req.ProcessName, req.Enabled)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+}
+
+// handleToolsSnapshot 拍下当前进程基线快照（录制第一步）。
+func (s *Server) handleToolsSnapshot(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	baseline := s.detector.SnapshotProcesses()
+	s.snapMu.Lock()
+	s.snapBaseline = baseline
+	s.snapMu.Unlock()
+	log.Printf("[监控工具] 已记录基线快照：%d 个进程", len(baseline))
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"count":   len(baseline),
+	})
+}
+
+// handleToolsDiff 用当前快照与基线做差集，返回疑似远程工具候选（录制第二步）。
+func (s *Server) handleToolsDiff(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	s.snapMu.Lock()
+	baseline := s.snapBaseline
+	s.snapMu.Unlock()
+	if baseline == nil {
+		writeJSONError(w, "请先点击「开始录制」再做对比", http.StatusBadRequest)
+		return
+	}
+	candidates := s.detector.DiffSnapshots(baseline)
+	log.Printf("[监控工具] 快照对比得到 %d 个候选", len(candidates))
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":    true,
+		"candidates": candidates,
+	})
+}
+
+// handleToolsCustom 新增/覆盖一条用户自定义工具规则。
+func (s *Server) handleToolsCustom(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var tool detector.RemoteTool
+	if err := json.NewDecoder(r.Body).Decode(&tool); err != nil {
+		writeJSONError(w, "请求格式无效", http.StatusBadRequest)
+		return
+	}
+	if tool.ProcessName == "" {
+		writeJSONError(w, "进程名不能为空", http.StatusBadRequest)
+		return
+	}
+	if tool.ToolName == "" {
+		tool.ToolName = tool.ProcessName
+	}
+	if err := s.detector.AddCustomTool(tool); err != nil {
+		writeJSONError(w, "保存自定义工具失败", http.StatusInternalServerError)
+		return
+	}
+	log.Printf("[监控工具] 已新增自定义工具：%s (%s)", tool.ToolName, tool.ProcessName)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "已添加 " + tool.ToolName,
+	})
+}
+
+// handleToolsCustomRemove 删除一条用户自定义工具规则。
+func (s *Server) handleToolsCustomRemove(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		ProcessName string `json:"processName"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ProcessName == "" {
+		writeJSONError(w, "请指定要删除的工具进程名", http.StatusBadRequest)
+		return
+	}
+	if err := s.detector.RemoveCustomTool(req.ProcessName); err != nil {
+		writeJSONError(w, "删除自定义工具失败", http.StatusInternalServerError)
+		return
+	}
+	log.Printf("[监控工具] 已删除自定义工具：%s", req.ProcessName)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+}
+
+// handleToolsRulesRaw 供高级用户直接读写"全部规则"（内置 + 自定义）的 JSON 文本。
+//
+//	GET  返回当前生效的全部规则（内置已应用用户修改 + 自定义）的美化 JSON
+//	POST 用整组规则覆盖：命中内置的存为覆盖层、未命中的存为自定义工具，校验后热重载
+func (s *Server) handleToolsRulesRaw(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		tools := s.detector.EffectiveRulesForEditor()
+		if tools == nil {
+			tools = []detector.RemoteTool{}
+		}
+		b, err := json.MarshalIndent(tools, "", "  ")
+		if err != nil {
+			writeJSONError(w, "序列化规则失败", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"json":    string(b),
+		})
+
+	case http.MethodPost:
+		var req struct {
+			JSON string `json:"json"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSONError(w, "请求格式无效", http.StatusBadRequest)
+			return
+		}
+		tools, err := detector.ParseRules(req.JSON)
+		if err != nil {
+			writeJSONError(w, "JSON 格式错误："+err.Error(), http.StatusBadRequest)
+			return
+		}
+		for i := range tools {
+			if tools[i].ProcessName == "" {
+				writeJSONError(w, "第 "+strconv.Itoa(i+1)+" 条规则缺少 processName", http.StatusBadRequest)
+				return
+			}
+			if tools[i].ToolName == "" {
+				tools[i].ToolName = tools[i].ProcessName
+			}
+		}
+		if err := s.detector.SaveRulesFromEditor(tools); err != nil {
+			writeJSONError(w, "保存规则失败", http.StatusInternalServerError)
+			return
+		}
+		log.Printf("[监控工具] 已手动保存全部规则：%d 条", len(tools))
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"message": "已保存 " + strconv.Itoa(len(tools)) + " 条规则",
+			"count":   len(tools),
+		})
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleToolsRulesReset 清空对内置规则的全部修改，恢复官方默认（不影响自定义工具）。
+func (s *Server) handleToolsRulesReset(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if err := s.detector.ResetBuiltinOverrides(); err != nil {
+		writeJSONError(w, "恢复默认失败", http.StatusInternalServerError)
+		return
+	}
+	log.Printf("[监控工具] 已恢复内置规则默认")
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "已恢复内置规则默认",
 	})
 }
 

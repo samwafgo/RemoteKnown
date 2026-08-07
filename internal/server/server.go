@@ -287,6 +287,14 @@ func (s *Server) handleNotification(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		// 补齐重复提醒配置的默认值（老配置中不存在这两个字段）
+		if allConfigs["repeat_enabled"] == nil {
+			allConfigs["repeat_enabled"] = false
+		}
+		if allConfigs["repeat_interval"] == nil {
+			allConfigs["repeat_interval"] = notifier.DefaultRepeatInterval
+		}
+
 		// 返回完整配置结构
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(allConfigs)
@@ -294,11 +302,13 @@ func (s *Server) handleNotification(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		// 保存通知配置
 		var newConfig struct {
-			Enabled    bool                   `json:"enabled"`
-			Type       string                 `json:"type"`
-			WebhookURL string                 `json:"webhook_url"`
-			Secret     string                 `json:"secret"`
-			Email      map[string]interface{} `json:"email"`
+			Enabled        bool                   `json:"enabled"`
+			Type           string                 `json:"type"`
+			WebhookURL     string                 `json:"webhook_url"`
+			Secret         string                 `json:"secret"`
+			Email          map[string]interface{} `json:"email"`
+			RepeatEnabled  bool                   `json:"repeat_enabled"`
+			RepeatInterval int                    `json:"repeat_interval"`
 		}
 
 		if err := json.NewDecoder(r.Body).Decode(&newConfig); err != nil {
@@ -322,6 +332,10 @@ func (s *Server) handleNotification(w http.ResponseWriter, r *http.Request) {
 		// 更新基本配置
 		allConfigs["enabled"] = newConfig.Enabled
 		allConfigs["type"] = newConfig.Type
+
+		// 重复提醒配置（与通知类型无关）：间隔规整到 >=10 秒，未填按默认 600 秒
+		allConfigs["repeat_enabled"] = newConfig.RepeatEnabled
+		allConfigs["repeat_interval"] = notifier.NormalizeRepeatInterval(newConfig.RepeatInterval)
 
 		// 更新对应类型的具体配置：邮件存到 email 子项，飞书/钉钉存 webhook_url+secret
 		if newConfig.Type == "email" {
@@ -349,7 +363,8 @@ func (s *Server) handleNotification(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		log.Printf("通知配置保存成功: type=%s, enabled=%v", newConfig.Type, newConfig.Enabled)
+		log.Printf("通知配置保存成功: type=%s, enabled=%v, 重复提醒=%v/%d秒",
+			newConfig.Type, newConfig.Enabled, newConfig.RepeatEnabled, allConfigs["repeat_interval"])
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"status": "success"})
 

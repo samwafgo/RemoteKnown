@@ -24,6 +24,12 @@ import (
 
 var debugMode = os.Getenv("REMOTEKNOWN_DEBUG") != ""
 
+// 远程持续期间的重复提醒间隔限制（秒）
+const (
+	MinRepeatInterval     = 10  // 最小间隔：10 秒
+	DefaultRepeatInterval = 600 // 默认间隔：10 分钟
+)
+
 // NotificationConfig 通知配置
 type NotificationConfig struct {
 	Enabled    bool        `json:"enabled"`
@@ -31,6 +37,20 @@ type NotificationConfig struct {
 	WebhookURL string      `json:"webhook_url"` // Webhook URL（飞书/钉钉）
 	Secret     string      `json:"secret"`      // 签名密钥（可选，飞书/钉钉）
 	Email      EmailConfig `json:"email"`       // 邮件配置（Type == "email" 时使用）
+
+	RepeatEnabled  bool `json:"repeat_enabled"`  // 远程持续期间是否重复提醒
+	RepeatInterval int  `json:"repeat_interval"` // 重复提醒间隔（秒），最小 10，默认 600
+}
+
+// NormalizeRepeatInterval 将重复提醒间隔规整到合法范围（<=0 取默认值，过小抬到最小值）
+func NormalizeRepeatInterval(seconds int) int {
+	if seconds <= 0 {
+		return DefaultRepeatInterval
+	}
+	if seconds < MinRepeatInterval {
+		return MinRepeatInterval
+	}
+	return seconds
 }
 
 // EmailConfig SMTP 邮件通知配置
@@ -106,6 +126,41 @@ func (n *Notifier) NotifyRemoteEnd(signals []detector.NotifierSignal) {
 	} else {
 		log.Printf("[通知器] 远程结束通知已发送")
 	}
+}
+
+// NotifyRemoteOngoing 通知远程控制仍在持续中（会话期间按配置间隔重复提醒）
+func (n *Notifier) NotifyRemoteOngoing(signals []detector.NotifierSignal, duration string) {
+	config, err := n.getConfig()
+	if err != nil || !config.Enabled || !config.RepeatEnabled {
+		return
+	}
+
+	signalNames := make([]string, len(signals))
+	for i, sig := range signals {
+		signalNames[i] = sig.GetName()
+	}
+
+	title := "🔁 远程控制持续中"
+	content := fmt.Sprintf("主机：%s\n\n远程控制会话仍在进行中\n\n已持续：%s\n\n检测信号：\n%s\n\n时间：%s",
+		n.getDeviceName(),
+		duration,
+		strings.Join(signalNames, "\n"),
+		time.Now().Format("2006-01-02 15:04:05"))
+
+	if err := n.sendNotification(config, title, content); err != nil {
+		log.Printf("[通知器] 发送远程持续提醒失败: %v", err)
+	} else {
+		log.Printf("[通知器] 远程持续提醒已发送（已持续 %s）", duration)
+	}
+}
+
+// RepeatInterval 返回远程持续期间的重复提醒间隔；返回 0 表示未启用
+func (n *Notifier) RepeatInterval() time.Duration {
+	config, err := n.getConfig()
+	if err != nil || !config.Enabled || !config.RepeatEnabled {
+		return 0
+	}
+	return time.Duration(NormalizeRepeatInterval(config.RepeatInterval)) * time.Second
 }
 
 // NotifyAppExit 通知应用退出
@@ -200,6 +255,14 @@ func (n *Notifier) getConfig() (NotificationConfig, error) {
 	// 获取基本配置
 	if enabled, ok := allConfigs["enabled"].(bool); ok {
 		config.Enabled = enabled
+	}
+
+	// 远程持续期间的重复提醒（与通知类型无关，存在配置顶层）
+	if repeatEnabled, ok := allConfigs["repeat_enabled"].(bool); ok {
+		config.RepeatEnabled = repeatEnabled
+	}
+	if interval, ok := allConfigs["repeat_interval"].(float64); ok {
+		config.RepeatInterval = int(interval)
 	}
 
 	currentType := "feishu"
@@ -601,6 +664,8 @@ func generateDingtalkSign(secret string, timestamp int64) string {
 func getFeishuColor(title string) string {
 	if strings.Contains(title, "⚠️") || strings.Contains(title, "告警") {
 		return "red"
+	} else if strings.Contains(title, "🔁") {
+		return "orange"
 	} else if strings.Contains(title, "✅") {
 		return "green"
 	} else if strings.Contains(title, "🔴") {

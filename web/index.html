@@ -877,6 +877,19 @@
                                     <input type="password" id="emailPassword" placeholder="公网邮箱填授权码（非登录密码）；内网匿名可留空">
                                 </div>
                             </div>
+                            <!-- 远程持续提醒：与通知类型无关，对飞书/钉钉/邮件都生效 -->
+                            <div class="form-group" style="border-top: 1px solid #e5e7eb; padding-top: 14px;">
+                                <div class="checkbox-group">
+                                    <input type="checkbox" id="repeatEnabled" name="repeat_enabled">
+                                    <label for="repeatEnabled">远程持续中重复提醒</label>
+                                </div>
+                                <div class="help-text">开启后，远程会话一直未断开时会按下面的间隔重复发送提醒</div>
+                            </div>
+                            <div class="form-group" id="repeatIntervalGroup" style="display: none;">
+                                <label for="repeatInterval">提醒间隔（秒）</label>
+                                <input type="number" id="repeatInterval" min="10" step="10" placeholder="600">
+                                <div class="help-text" id="repeatIntervalHint">最小 10 秒，默认 600 秒（10 分钟）</div>
+                            </div>
                             <div class="form-group">
                                 <div id="testResult"
                                     style="display: none; padding: 8px; border-radius: 4px; font-size: 12px; margin-top: 8px;">
@@ -2161,6 +2174,43 @@
             }
         }
 
+        // 重复提醒：勾选后才显示间隔输入框，并实时把秒数换算成易读文案
+        function updateRepeatFields() {
+            const enabled = document.getElementById('repeatEnabled').checked;
+            document.getElementById('repeatIntervalGroup').style.display = enabled ? 'block' : 'none';
+            if (enabled) updateRepeatHint();
+        }
+
+        function formatIntervalText(seconds) {
+            if (seconds < 60) return seconds + ' 秒';
+            const m = Math.floor(seconds / 60);
+            const s = seconds % 60;
+            const hour = Math.floor(m / 60);
+            if (hour >= 1) {
+                const min = m % 60;
+                return min > 0 ? `${hour} 小时 ${min} 分钟` : `${hour} 小时`;
+            }
+            return s > 0 ? `${m} 分钟 ${s} 秒` : `${m} 分钟`;
+        }
+
+        function updateRepeatHint() {
+            const hint = document.getElementById('repeatIntervalHint');
+            const val = parseInt(document.getElementById('repeatInterval').value, 10);
+            if (!val || val <= 0) {
+                hint.textContent = '最小 10 秒，留空按默认 600 秒（10 分钟）';
+                hint.style.color = '';
+            } else if (val < 10) {
+                hint.textContent = '间隔不能小于 10 秒';
+                hint.style.color = '#b91c1c';
+            } else {
+                hint.textContent = `远程持续期间每 ${formatIntervalText(val)} 提醒一次`;
+                hint.style.color = '';
+            }
+        }
+
+        document.getElementById('repeatEnabled').addEventListener('change', updateRepeatFields);
+        document.getElementById('repeatInterval').addEventListener('input', updateRepeatHint);
+
         async function loadNotificationConfig() {
             if (!window.remoteAudit) return;
 
@@ -2196,6 +2246,11 @@
                             to: config.email.to || ''
                         };
                     }
+
+                    // 远程持续提醒（全局配置，与通知类型无关）
+                    document.getElementById('repeatEnabled').checked = config.repeat_enabled || false;
+                    document.getElementById('repeatInterval').value = config.repeat_interval || 600;
+                    updateRepeatFields();
 
                     // 显示当前类型的配置和对应字段
                     loadTypeFromCache(currentNotificationType);
@@ -2270,6 +2325,16 @@
 
             const enabled = document.getElementById('notificationEnabled').checked;
             const type = document.getElementById('notificationType').value;
+
+            // 远程持续提醒：勾选后间隔必须 >= 10 秒，留空按默认 600 秒
+            const repeatEnabled = document.getElementById('repeatEnabled').checked;
+            const repeatRaw = document.getElementById('repeatInterval').value.trim();
+            const repeatInterval = repeatRaw === '' ? 600 : (parseInt(repeatRaw, 10) || 0);
+            if (repeatEnabled && repeatInterval < 10) {
+                alert('提醒间隔不能小于 10 秒');
+                return;
+            }
+
             let config;
             if (type === 'email') {
                 const email = getEmailFormConfig();
@@ -2290,6 +2355,9 @@
                     return;
                 }
             }
+
+            config.repeat_enabled = repeatEnabled;
+            config.repeat_interval = repeatInterval;
 
             try {
                 const result = await window.remoteAudit.saveNotificationConfig(config);

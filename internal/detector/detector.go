@@ -29,12 +29,14 @@ type DetectionResult struct {
 }
 
 type Detector struct {
-	storage     *storage.Storage
-	notifier    Notifier
-	windows     *WindowsDetector
-	signals     []Signal
-	lastState   bool
-	lastChange  time.Time
+	storage    *storage.Storage
+	notifier   Notifier
+	windows    *WindowsDetector
+	signals    []Signal
+	lastState  bool
+	lastChange time.Time
+	// lastRepeat 上次发送“远程持续中”提醒的时间；会话结束时清零
+	lastRepeat  time.Time
 	stateMutex  sync.RWMutex
 	signalMutex sync.RWMutex
 	windowsMu   sync.Mutex
@@ -44,6 +46,10 @@ type Detector struct {
 type Notifier interface {
 	NotifyRemoteStart(signals []NotifierSignal)
 	NotifyRemoteEnd(signals []NotifierSignal)
+	// NotifyRemoteOngoing 远程持续期间的重复提醒，duration 为已持续时长
+	NotifyRemoteOngoing(signals []NotifierSignal, duration string)
+	// RepeatInterval 重复提醒间隔，返回 0 表示未启用
+	RepeatInterval() time.Duration
 }
 
 // NotifierSignal 接口，用于通知
@@ -188,13 +194,32 @@ func (d *Detector) detect() {
 		d.lastState = isRemote
 
 		if isRemote {
+			d.lastRepeat = d.lastChange
 			d.handleRemoteStart(allSignals)
 		} else {
+			d.lastRepeat = time.Time{}
 			d.handleRemoteEnd()
 		}
 	}
 
+	// 会话持续中：按配置间隔重复提醒（间隔判断在锁内完成，实际发送放到锁外避免阻塞检测）
+	repeatDuration := ""
+	if isRemote {
+		if interval := d.repeatInterval(); interval > 0 {
+			if d.lastRepeat.IsZero() {
+				d.lastRepeat = time.Now()
+			} else if time.Since(d.lastRepeat) >= interval {
+				d.lastRepeat = time.Now()
+				repeatDuration = formatDuration(time.Since(d.lastChange))
+			}
+		}
+	}
+
 	d.stateMutex.Unlock()
+
+	if repeatDuration != "" {
+		d.handleRemoteOngoing(allSignals, repeatDuration)
+	}
 
 	if debugMode {
 		log.Printf("检测结果: 远程=%v, 信号数=%d", isRemote, len(allSignals))
@@ -245,6 +270,24 @@ func (d *Detector) handleRemoteStart(signals []Signal) {
 		}
 		d.notifier.NotifyRemoteStart(notifierSignals)
 	}
+}
+
+// repeatInterval 读取通知配置中的重复提醒间隔，未配置通知器或未启用时返回 0
+func (d *Detector) repeatInterval() time.Duration {
+	if d.notifier == nil {
+		return 0
+	}
+	return d.notifier.RepeatInterval()
+}
+
+// handleRemoteOngoing 发送“远程仍在持续”的重复提醒
+func (d *Detector) handleRemoteOngoing(signals []Signal, duration string) {
+	notifierSignals := make([]NotifierSignal, len(signals))
+	for i, s := range signals {
+		notifierSignals[i] = notifierSignal{name: s.Name}
+	}
+	log.Printf("远程会话持续提醒: 已持续 %s", duration)
+	d.notifier.NotifyRemoteOngoing(notifierSignals, duration)
 }
 
 func (d *Detector) handleRemoteEnd() {

@@ -37,3 +37,9 @@ Thumbs.db
 RemoteKnown-daemon.exe
 web/dist/
 web/node_modules/
+
+tech_doc/
+CLAUDE.md 
+.claude
+.cursor
+.trae

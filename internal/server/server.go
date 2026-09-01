@@ -795,17 +795,18 @@ func (s *Server) handleToolsToggle(w http.ResponseWriter, r *http.Request) {
 	}
 	var req struct {
 		ProcessName string `json:"processName"`
+		ToolName    string `json:"toolName"` // 同一进程可能对应多个工具，带上才能精确定位；留空则退化为按进程名操作
 		Enabled     bool   `json:"enabled"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ProcessName == "" {
 		writeJSONError(w, "请指定工具进程名", http.StatusBadRequest)
 		return
 	}
-	if err := s.detector.SetToolEnabled(req.ProcessName, req.Enabled); err != nil {
+	if err := s.detector.SetToolEnabled(req.ProcessName, req.ToolName, req.Enabled); err != nil {
 		writeJSONError(w, "更新监控状态失败", http.StatusInternalServerError)
 		return
 	}
-	log.Printf("[监控工具] %s 监控状态=%v", req.ProcessName, req.Enabled)
+	log.Printf("[监控工具] %s(%s) 监控状态=%v", req.ToolName, req.ProcessName, req.Enabled)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
 }
@@ -888,16 +889,17 @@ func (s *Server) handleToolsCustomRemove(w http.ResponseWriter, r *http.Request)
 	}
 	var req struct {
 		ProcessName string `json:"processName"`
+		ToolName    string `json:"toolName"` // 留空则删除该进程名下的全部自定义规则
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ProcessName == "" {
 		writeJSONError(w, "请指定要删除的工具进程名", http.StatusBadRequest)
 		return
 	}
-	if err := s.detector.RemoveCustomTool(req.ProcessName); err != nil {
+	if err := s.detector.RemoveCustomTool(req.ProcessName, req.ToolName); err != nil {
 		writeJSONError(w, "删除自定义工具失败", http.StatusInternalServerError)
 		return
 	}
-	log.Printf("[监控工具] 已删除自定义工具：%s", req.ProcessName)
+	log.Printf("[监控工具] 已删除自定义工具：%s(%s)", req.ToolName, req.ProcessName)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
 }

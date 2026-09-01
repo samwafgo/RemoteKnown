@@ -176,8 +176,15 @@ func (d *WindowsDetector) DetectRemoteTools() ([]Signal, error) {
 	rules := d.rules
 	d.rulesMu.RUnlock()
 
-	// 检查每个远程工具
+	// 检查每个远程工具。
+	// 规则表是扁平的：同一工具可能有多条规则（对应不同版本/场景的特征），
+	// 任一命中即算被远程；signalled 保证同一工具只产出一条信号，避免通知/历史重复。
+	signalled := make(map[string]bool, len(rules))
+
 	for _, tool := range rules {
+		if signalled[ToolKey(tool)] {
+			continue
+		}
 		// 第一步：收集所有匹配的进程（可能有多个同名进程，或检查所有进程）
 		var matchedProcesses []*process.Process
 
@@ -326,11 +333,19 @@ func (d *WindowsDetector) DetectRemoteTools() ([]Signal, error) {
 				signalName += " (" + detectionMethod + ")"
 			}
 
+			// 信号名只带工具名与检测手段，保持通知/历史简洁；
+			// 具体命中的是哪条规则（备注）写进 Source，便于事后排查。
+			source := fmt.Sprintf("进程:%s PID:%d", tool.ProcessName, remoteProcess.Pid)
+			if tool.Remark != "" {
+				source += " 规则:" + tool.Remark
+			}
+
+			signalled[ToolKey(tool)] = true
 			signals = append(signals, Signal{
 				Type:       "remote_tool",
 				Name:       signalName,
 				Confidence: 1.0, // 简化：检测到就是1.0
-				Source:     fmt.Sprintf("进程:%s PID:%d", tool.ProcessName, remoteProcess.Pid),
+				Source:     source,
 				DetectedAt: time.Now(),
 			})
 		}

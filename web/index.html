@@ -957,8 +957,10 @@
                             <summary style="cursor:pointer; font-size:13px; color:#4338ca;">高级 · 手动编辑规则 (JSON)</summary>
                             <div style="margin-top:10px;">
                                 <p style="font-size:11px; color:#888; margin:0 0 6px 0;">
-                                    直接编辑全部规则（含内置）。可用字段：
-                                    <code>processName</code>(必填) · <code>toolName</code> · <code>commandLineArgs</code>[] ·
+                                    直接编辑全部规则（含内置）。同一进程可以写多条规则（同一工具的不同版本特征，
+                                    <code>toolName</code> 保持一致即可，任一命中即判定为远程）。可用字段：
+                                    <code>processName</code>(必填) · <code>toolName</code> · <code>remark</code>(备注) ·
+                                    <code>id</code>(规则标识) · <code>commandLineArgs</code>[] ·
                                     <code>detectChildProcess</code> · <code>childProcessExcludeArgs</code>[] ·
                                     <code>windowClass</code> · <code>windowTitle</code> ·
                                     <code>tcpConnThreshold</code> · <code>useEstablishedOnly</code> · <code>udpConnThreshold</code>
@@ -1468,25 +1470,34 @@
                     container.innerHTML = '<span style="font-size:12px;color:#9ca3af;">暂无工具</span>';
                     return;
                 }
-                container.innerHTML = tools.map(t => {
-                    const pn = toolsEscape(t.processName);
+                window._monitoredTools = tools;
+                container.innerHTML = tools.map((t, i) => {
                     const badge = t.source === 'custom'
                         ? '<span class="tool-badge">自定义</span>'
                         : '';
                     const del = t.source === 'custom'
-                        ? `<a class="action-link" href="#" onclick="removeCustomTool('${pn}');return false;">删除</a>`
+                        ? `<a class="action-link" href="#" onclick="removeCustomTool(${i});return false;">删除</a>`
                         : '';
+                    // 同一工具可能有多条规则（对应不同版本/场景的特征），逐条列出备注
+                    const rules = t.rules || [];
+                    const ruleLines = rules.length > 1 || (rules[0] && rules[0].remark)
+                        ? `<div style="margin-top:3px;">` + rules.map(r =>
+                            `<div style="font-size:11px;color:#9ca3af;line-height:1.6;">· ${toolsEscape(r.remark || ruleSummary(r))}</div>`
+                          ).join('') + `</div>`
+                        : '';
+                    const countTag = rules.length > 1 ? ` · ${rules.length} 条检测规则` : '';
                     return `
                         <div class="tool-row">
                             ${toolIconHtml(t.iconDataURI, t.toolName)}
                             <div class="tool-meta">
                                 <div class="tool-name">${toolsEscape(t.toolName)}${badge}</div>
-                                <div class="tool-proc">${pn}</div>
+                                <div class="tool-proc">${toolsEscape(t.processName)}${countTag}</div>
+                                ${ruleLines}
                             </div>
                             ${del}
                             <label class="switch-label" style="display:flex;align-items:center;gap:4px;">
                                 <input type="checkbox" ${t.enabled ? 'checked' : ''}
-                                    onchange="toggleTool('${pn}', this.checked)">
+                                    onchange="toggleTool(${i}, this.checked)">
                                 <span style="font-size:12px;color:#666;">关注</span>
                             </label>
                         </div>`;
@@ -1496,21 +1507,38 @@
             }
         }
 
-        async function toggleTool(processName, enabled) {
-            if (!window.remoteAudit) return;
+        // 没写备注的规则，按其检测维度生成一句说明
+        function ruleSummary(r) {
+            if (!r) return '';
+            if (r.commandLineArgs && r.commandLineArgs.length) return '命令行含：' + r.commandLineArgs.join(' ');
+            if (r.detectChildProcess) return '出现会话子进程';
+            if (r.windowTitle) return '窗口标题含：' + r.windowTitle;
+            if (r.windowClass) return '窗口类名：' + r.windowClass;
+            if (r.tcpConnThreshold) return 'TCP 连接数 ≥ ' + r.tcpConnThreshold;
+            if (r.udpConnThreshold) return 'UDP 连接数 > ' + r.udpConnThreshold;
+            return '进程存在即判定';
+        }
+
+        // 关注开关作用于整个工具：该工具名下的多条规则一起启停
+        async function toggleTool(index, enabled) {
+            const t = (window._monitoredTools || [])[index];
+            if (!t || !window.remoteAudit) return;
             try {
-                await window.remoteAudit.toolsToggle(processName, enabled);
+                await window.remoteAudit.toolsToggle(t.processName, t.toolName, enabled);
             } catch (e) {
                 alert('更新失败：' + e.message);
                 loadTools();
             }
         }
 
-        async function removeCustomTool(processName) {
-            if (!window.remoteAudit) return;
-            if (!confirm('确定删除自定义工具 ' + processName + ' 吗？')) return;
+        async function removeCustomTool(index) {
+            const t = (window._monitoredTools || [])[index];
+            if (!t || !window.remoteAudit) return;
+            const n = (t.rules || []).length;
+            if (!confirm('确定删除自定义工具 ' + t.toolName + '（' + t.processName + '）吗？'
+                + (n > 1 ? '\n它下面的 ' + n + ' 条检测规则会一并删除。' : ''))) return;
             try {
-                await window.remoteAudit.toolsRemoveCustom(processName);
+                await window.remoteAudit.toolsRemoveCustom(t.processName, t.toolName);
                 loadTools();
             } catch (e) {
                 alert('删除失败：' + e.message);
@@ -1606,6 +1634,13 @@
                     <div class="form-group">
                         <label>工具名称</label>
                         <input type="text" id="ctName" value="${toolsEscape(c.processName.replace(/\.exe$/i, ''))}">
+                        <p style="font-size:11px;color:#888;margin:4px 0 0 0;">
+                            同一款软件的不同版本特征可以录多条：工具名填一样的，用下面的备注区分。
+                        </p>
+                    </div>
+                    <div class="form-group">
+                        <label>备注（可选）</label>
+                        <input type="text" id="ctRemark" placeholder="这条规则针对哪个版本 / 哪种场景，如：新版拖拽会话">
                     </div>
                     <div class="form-group">
                         <label>进程名（锚点，不可改）</label>
@@ -1650,6 +1685,8 @@
             const c = window._selectedCandidate;
             if (!c || !window.remoteAudit) return;
             const tool = { processName: c.processName, toolName: document.getElementById('ctName').value.trim() || c.processName };
+            const remark = (document.getElementById('ctRemark').value || '').trim();
+            if (remark) tool.remark = remark;
 
             if (document.getElementById('ctUseTcp').checked) {
                 const v = parseInt(document.getElementById('ctTcp').value, 10);

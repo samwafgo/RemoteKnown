@@ -1,6 +1,6 @@
 {
-  "version": "1.0.0",
-  "minAppVersion": "1.0.0",
-  "description": "初始内置检测规则",
-  "updatedAt": "2026-06-16"
+  "version": "1.0.2",
+  "minAppVersion": "1.0.8",
+  "description": "向日葵新增文件拖拽会话（dragserver）检测；规则支持同进程多条并带备注",
+  "updatedAt": "2026-09-01"
 }

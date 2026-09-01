@@ -625,8 +625,8 @@ function setupIPC() {
         return await fetchAPI('/api/tools');
     });
 
-    ipcMain.handle('toolsToggle', async (event, processName, enabled) => {
-        return await fetchAPIPost('/api/tools/toggle', { processName, enabled });
+    ipcMain.handle('toolsToggle', async (event, processName, toolName, enabled) => {
+        return await fetchAPIPost('/api/tools/toggle', { processName, toolName, enabled });
     });
 
     ipcMain.handle('toolsSnapshot', async () => {
@@ -641,8 +641,8 @@ function setupIPC() {
         return await fetchAPIPost('/api/tools/custom', tool);
     });
 
-    ipcMain.handle('toolsRemoveCustom', async (event, processName) => {
-        return await fetchAPIPost('/api/tools/custom/remove', { processName });
+    ipcMain.handle('toolsRemoveCustom', async (event, processName, toolName) => {
+        return await fetchAPIPost('/api/tools/custom/remove', { processName, toolName });
     });
 
     ipcMain.handle('toolsGetRulesRaw', async () => {

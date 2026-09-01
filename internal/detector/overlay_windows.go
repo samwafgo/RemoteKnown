@@ -8,16 +8,25 @@ import (
 // 用户叠加层的 Config KV：与版本化规则集独立存储，避免被官方规则更新覆盖。
 const (
 	ConfigKeyCustomTools   = "custom_tools"   // []RemoteTool 的 JSON：用户录制的自定义工具
-	ConfigKeyDisabledTools = "disabled_tools" // []string 的 JSON：用户取消关注的工具进程名（小写）
-	ConfigKeyToolOverrides = "tool_overrides" // map[进程名(小写)]RemoteTool 的 JSON：用户对内置规则的修改（覆盖层）
+	ConfigKeyDisabledTools = "disabled_tools" // []string 的 JSON：用户取消关注的工具键（ToolKey，兼容旧的纯进程名）
+	ConfigKeyToolOverrides = "tool_overrides" // map[RuleKey]RemoteTool 的 JSON：用户对内置规则的修改（覆盖层，兼容旧的纯进程名键）
 )
 
-// MonitoredTool 是合并后供前端展示的监控项：官方/自定义规则 + 来源 + 是否启用 + 图标。
-type MonitoredTool struct {
+// MonitoredRule 是监控对象卡片下的一条具体检测规则。
+type MonitoredRule struct {
 	RemoteTool
-	Source      string `json:"source"`                // builtin | custom
-	Enabled     bool   `json:"enabled"`               // 是否在监控中（未被加入 disabled_tools）
-	IconDataURI string `json:"iconDataURI,omitempty"` // 进程在运行时从 exe 提取的图标
+	Source string `json:"source"` // builtin | custom
+}
+
+// MonitoredTool 是合并后供前端展示的监控项：按「工具身份」（进程名 + 工具名）聚合，
+// 同一工具下针对不同版本/场景的多条规则收在 Rules 里，各自带 remark 备注。
+type MonitoredTool struct {
+	ProcessName string          `json:"processName"`
+	ToolName    string          `json:"toolName"`
+	Source      string          `json:"source"`                // builtin（含任一内置规则）| custom（全部由用户录制）
+	Enabled     bool            `json:"enabled"`               // 是否在监控中（未被加入 disabled_tools）
+	IconDataURI string          `json:"iconDataURI,omitempty"` // 进程在运行时从 exe 提取的图标
+	Rules       []MonitoredRule `json:"rules"`                 // 该工具下的全部检测规则
 }
 
 // officialRules 读取当前生效规则集（内置/GitHub/手工导入）的规则数组。
@@ -30,7 +39,7 @@ func (d *Detector) officialRules() []RemoteTool {
 	return rules
 }
 
-// GetToolOverrides 读取用户对内置规则的修改（覆盖层），键为进程名小写。
+// GetToolOverrides 读取用户对内置规则的修改（覆盖层），键为 RuleKey（存量数据可能是纯进程名）。
 func (d *Detector) GetToolOverrides() (map[string]RemoteTool, error) {
 	raw, err := d.storage.GetConfig(ConfigKeyToolOverrides)
 	if err != nil || raw == "" {
@@ -54,18 +63,28 @@ func (d *Detector) setToolOverrides(ov map[string]RemoteTool) error {
 	return d.storage.SetConfig(ConfigKeyToolOverrides, string(b))
 }
 
-// applyOverrides 用覆盖层替换官方规则中同进程名的条目（不改变顺序）。
+// applyOverrides 用覆盖层替换官方规则中同 RuleKey 的条目（不改变顺序）。
+//
+// 兼容 v1.0.7 及更早版本按纯进程名存的覆盖：这类键只作用于该进程名的第一条规则
+// （即当年存覆盖时唯一存在的那条），避免把后来新增的同进程规则一起冲掉。
 func applyOverrides(official []RemoteTool, ov map[string]RemoteTool) []RemoteTool {
 	if len(ov) == 0 {
 		return official
 	}
+	legacyUsed := make(map[string]bool)
 	out := make([]RemoteTool, len(official))
 	for i, t := range official {
-		if o, ok := ov[strings.ToLower(t.ProcessName)]; ok {
+		if o, ok := ov[RuleKey(t)]; ok {
 			out[i] = o
-		} else {
-			out[i] = t
+			continue
 		}
+		lk := legacyKey(t)
+		if o, ok := ov[lk]; ok && !legacyUsed[lk] {
+			legacyUsed[lk] = true
+			out[i] = o
+			continue
+		}
+		out[i] = t
 	}
 	return out
 }
@@ -98,7 +117,7 @@ func (d *Detector) setCustomTools(tools []RemoteTool) error {
 	return d.storage.SetConfig(ConfigKeyCustomTools, string(b))
 }
 
-// GetDisabledTools 读取用户取消关注的工具进程名（小写）。
+// GetDisabledTools 读取用户取消关注的工具键（ToolKey，存量数据可能是纯进程名）。
 func (d *Detector) GetDisabledTools() ([]string, error) {
 	raw, err := d.storage.GetConfig(ConfigKeyDisabledTools)
 	if err != nil || raw == "" {
@@ -119,31 +138,42 @@ func (d *Detector) setDisabledTools(names []string) error {
 	return d.storage.SetConfig(ConfigKeyDisabledTools, string(b))
 }
 
+// disabledSet 把存储的「取消关注」列表读成集合，元素既可能是 ToolKey 也可能是旧的纯进程名。
+func (d *Detector) disabledSet() map[string]bool {
+	disabled, _ := d.GetDisabledTools()
+	set := make(map[string]bool, len(disabled))
+	for _, n := range disabled {
+		set[strings.ToLower(n)] = true
+	}
+	return set
+}
+
+// isDisabled 判断一条规则所属的工具是否被用户取消关注（兼容旧的纯进程名键）。
+func isDisabled(set map[string]bool, t RemoteTool) bool {
+	return set[ToolKey(t)] || set[legacyKey(t)]
+}
+
 // mergeUserOverlay 把官方规则与用户叠加层合并：
-// 先用覆盖层替换内置规则的修改，再追加自定义工具（按进程名去重），最后过滤已禁用工具。
+// 先用覆盖层替换内置规则的修改，再追加自定义工具（按 RuleKey 去重），最后过滤已取消关注的工具。
+//
+// 注意去重用的是「规则身份」而不是进程名：同一进程可以保留多条规则（同一工具的不同版本特征），
+// 检测时任一命中即判定为被远程。
 func (d *Detector) mergeUserOverlay(official []RemoteTool) []RemoteTool {
 	overrides, _ := d.GetToolOverrides()
 	official = applyOverrides(official, overrides)
 	custom, _ := d.GetCustomTools()
-	disabled, _ := d.GetDisabledTools()
-
-	dset := make(map[string]bool, len(disabled))
-	for _, n := range disabled {
-		dset[strings.ToLower(n)] = true
-	}
+	dset := d.disabledSet()
 
 	merged := make([]RemoteTool, 0, len(official)+len(custom))
 	seen := make(map[string]bool, len(official)+len(custom))
 	appendTool := func(t RemoteTool) {
-		key := strings.ToLower(t.ProcessName)
-		if key != "" {
-			if seen[key] {
-				return
-			}
-			seen[key] = true
-			if dset[key] {
-				return // 用户取消关注
-			}
+		key := RuleKey(t)
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		if isDisabled(dset, t) {
+			return // 用户取消关注
 		}
 		merged = append(merged, t)
 	}
@@ -156,16 +186,16 @@ func (d *Detector) mergeUserOverlay(official []RemoteTool) []RemoteTool {
 	return merged
 }
 
-// AddCustomTool 新增/覆盖一条自定义工具规则（按进程名去重），并热重载检测规则。
+// AddCustomTool 新增/覆盖一条自定义工具规则（按 RuleKey 去重），并热重载检测规则。
 func (d *Detector) AddCustomTool(tool RemoteTool) error {
 	tools, err := d.GetCustomTools()
 	if err != nil {
 		return err
 	}
-	key := strings.ToLower(tool.ProcessName)
+	key := RuleKey(tool)
 	replaced := false
 	for i := range tools {
-		if strings.ToLower(tools[i].ProcessName) == key {
+		if RuleKey(tools[i]) == key {
 			tools[i] = tool
 			replaced = true
 			break
@@ -180,8 +210,8 @@ func (d *Detector) AddCustomTool(tool RemoteTool) error {
 	return d.ReloadRules()
 }
 
-// EffectiveRulesForEditor 返回供高级文本编辑器展示的"全部规则"：
-// 内置规则（已应用用户覆盖）+ 自定义工具，按进程名去重；不应用"取消关注"过滤，使所有规则可见。
+// EffectiveRulesForEditor 返回供高级文本编辑器展示的「全部规则」：
+// 内置规则（已应用用户覆盖）+ 自定义工具，按 RuleKey 去重；不应用「取消关注」过滤，使所有规则可见。
 func (d *Detector) EffectiveRulesForEditor() []RemoteTool {
 	overrides, _ := d.GetToolOverrides()
 	official := applyOverrides(d.officialRules(), overrides)
@@ -190,13 +220,11 @@ func (d *Detector) EffectiveRulesForEditor() []RemoteTool {
 	out := make([]RemoteTool, 0, len(official)+len(custom))
 	seen := make(map[string]bool, len(official)+len(custom))
 	add := func(t RemoteTool) {
-		key := strings.ToLower(t.ProcessName)
-		if key != "" {
-			if seen[key] {
-				return
-			}
-			seen[key] = true
+		key := RuleKey(t)
+		if seen[key] {
+			return
 		}
+		seen[key] = true
 		out = append(out, t)
 	}
 	for _, t := range official {
@@ -208,25 +236,28 @@ func (d *Detector) EffectiveRulesForEditor() []RemoteTool {
 	return out
 }
 
-// SaveRulesFromEditor 保存高级文本编辑器提交的"全部规则"，并热重载：
-//   - 进程名命中内置规则且内容有改动 → 记为覆盖层（可一键恢复默认、且不被官方更新冲掉）
-//   - 进程名未命中内置规则 → 记为自定义工具
+// SaveRulesFromEditor 保存高级文本编辑器提交的「全部规则」，并热重载：
+//   - RuleKey 命中内置规则且内容有改动 → 记为覆盖层（可一键恢复默认、且不被官方更新冲掉）
+//   - RuleKey 未命中内置规则 → 记为自定义工具
 //
-// 内置规则即便从编辑器删除也不会消失（下次仍按默认展示），如需停用请用"关注"开关；
+// 内置规则即便从编辑器删除也不会消失（下次仍按默认展示），如需停用请用「关注」开关；
 // 自定义工具从编辑器删除即等于删除。
+//
+// 内置规则带 id，因此在编辑器里改工具名/进程名也仍能对上基线记为覆盖；
+// 没有 id 的规则以「进程名|工具名」为身份，改这两项等于换成了一条新规则。
 func (d *Detector) SaveRulesFromEditor(edited []RemoteTool) error {
 	baseline := d.officialRules()
 	bmap := make(map[string]RemoteTool, len(baseline))
 	for _, t := range baseline {
-		bmap[strings.ToLower(t.ProcessName)] = t
+		bmap[RuleKey(t)] = t
 	}
 
 	overrides := make(map[string]RemoteTool)
 	custom := make([]RemoteTool, 0)
 	seen := make(map[string]bool)
 	for _, e := range edited {
-		key := strings.ToLower(e.ProcessName)
-		if key == "" || seen[key] {
+		key := RuleKey(e)
+		if e.ProcessName == "" || seen[key] {
 			continue
 		}
 		seen[key] = true
@@ -256,16 +287,20 @@ func (d *Detector) ResetBuiltinOverrides() error {
 	return d.ReloadRules()
 }
 
-// RemoveCustomTool 按进程名删除一条自定义工具规则，并热重载检测规则。
-func (d *Detector) RemoveCustomTool(processName string) error {
+// RemoveCustomTool 删除某个自定义工具的全部规则（按工具身份匹配），并热重载检测规则。
+// toolName 留空时退化为按进程名删除（兼容旧调用）。
+func (d *Detector) RemoveCustomTool(processName, toolName string) error {
 	tools, err := d.GetCustomTools()
 	if err != nil {
 		return err
 	}
-	key := strings.ToLower(processName)
+	pn := strings.ToLower(processName)
+	tn := strings.ToLower(toolName)
 	kept := tools[:0]
 	for _, t := range tools {
-		if strings.ToLower(t.ProcessName) != key {
+		match := strings.ToLower(t.ProcessName) == pn &&
+			(tn == "" || strings.ToLower(t.ToolName) == tn)
+		if !match {
 			kept = append(kept, t)
 		}
 	}
@@ -276,18 +311,23 @@ func (d *Detector) RemoveCustomTool(processName string) error {
 }
 
 // SetToolEnabled 设置某工具是否被监控（写入/移出 disabled_tools），并热重载检测规则。
-func (d *Detector) SetToolEnabled(processName string, enabled bool) error {
+// 作用于整个工具（该工具下的全部规则一起启停）。toolName 留空时退化为按进程名操作。
+func (d *Detector) SetToolEnabled(processName, toolName string, enabled bool) error {
 	disabled, err := d.GetDisabledTools()
 	if err != nil {
 		return err
 	}
-	key := strings.ToLower(processName)
+	key := ToolKey(RemoteTool{ProcessName: processName, ToolName: toolName})
+	legacy := strings.ToLower(processName)
+
 	out := disabled[:0]
 	present := false
 	for _, n := range disabled {
-		if strings.ToLower(n) == key {
+		lower := strings.ToLower(n)
+		// 同时清掉新键与旧的纯进程名键，避免残留导致关不掉/开不了
+		if lower == key || lower == legacy {
 			present = true
-			continue // 先全部移除，下面按需重新加入
+			continue
 		}
 		out = append(out, n)
 	}
@@ -303,31 +343,48 @@ func (d *Detector) SetToolEnabled(processName string, enabled bool) error {
 	return d.ReloadRules()
 }
 
-// ListMonitoredTools 返回"官方规则 + 自定义工具"的合并清单（去重），每条带来源、是否启用与图标。
+// ListMonitoredTools 返回「官方规则 + 自定义工具」的监控清单，按工具身份（进程名 + 工具名）聚合：
+// 同一工具下的多条规则收在 Rules 里（各带 remark 备注），关注开关与图标作用于整个工具。
 func (d *Detector) ListMonitoredTools() ([]MonitoredTool, error) {
 	overrides, _ := d.GetToolOverrides()
 	official := applyOverrides(d.officialRules(), overrides)
 	custom, _ := d.GetCustomTools()
-	disabled, _ := d.GetDisabledTools()
-	dset := make(map[string]bool, len(disabled))
-	for _, n := range disabled {
-		dset[strings.ToLower(n)] = true
-	}
+	dset := d.disabledSet()
 
-	seen := make(map[string]bool)
 	out := make([]MonitoredTool, 0, len(official)+len(custom))
+	idx := make(map[string]int)       // ToolKey → out 下标
+	seenRule := make(map[string]bool) // RuleKey 去重
+	icons := make(map[string]string)  // 进程名 → 图标，避免同工具多条规则重复提取
+
 	add := func(t RemoteTool, source string) {
-		key := strings.ToLower(t.ProcessName)
-		if key != "" && seen[key] {
+		rk := RuleKey(t)
+		if seenRule[rk] {
 			return
 		}
-		seen[key] = true
-		out = append(out, MonitoredTool{
-			RemoteTool:  t,
-			Source:      source,
-			Enabled:     !dset[key],
-			IconDataURI: d.toolIcon(t.ProcessName),
-		})
+		seenRule[rk] = true
+
+		tk := ToolKey(t)
+		i, ok := idx[tk]
+		if !ok {
+			pn := strings.ToLower(t.ProcessName)
+			icon, cached := icons[pn]
+			if !cached {
+				icon = d.toolIcon(t.ProcessName)
+				icons[pn] = icon
+			}
+			out = append(out, MonitoredTool{
+				ProcessName: t.ProcessName,
+				ToolName:    t.ToolName,
+				Source:      source,
+				Enabled:     !isDisabled(dset, t),
+				IconDataURI: icon,
+			})
+			i = len(out) - 1
+			idx[tk] = i
+		} else if source == "builtin" {
+			out[i].Source = "builtin" // 工具下只要有内置规则，就不允许整组删除
+		}
+		out[i].Rules = append(out[i].Rules, MonitoredRule{RemoteTool: t, Source: source})
 	}
 	for _, t := range official {
 		add(t, "builtin")

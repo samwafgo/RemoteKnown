@@ -1,37 +1,56 @@
 {
-  "version": "1.0.0",
-  "minAppVersion": "1.0.0",
+  "version": "1.0.2",
+  "minAppVersion": "1.0.8",
   "tools": [
     {
+      "id": "todesk-session",
       "processName": "todesk.exe",
+      "toolName": "ToDesk",
+      "remark": "会话进程（命令行参数 / 会话子进程）",
       "commandLineArgs": ["--localPort=", "--isVideoSession=true"],
       "detectChildProcess": true,
-      "childProcessExcludeArgs": ["--runservice", "--localPort", "--isVideoSession", "--hide"],
-      "toolName": "ToDesk"
+      "childProcessExcludeArgs": ["--runservice", "--localPort", "--isVideoSession", "--hide"]
     },
     {
+      "id": "awesun-desktopagent",
       "processName": "AweSun.exe",
-      "commandLineArgs": ["--mod=desktopagent", "--port=", "--agentid=", "--lockscreen="],
-      "toolName": "向日葵"
+      "toolName": "向日葵",
+      "remark": "远程桌面会话（desktopagent）",
+      "commandLineArgs": ["--mod=desktopagent", "--port=", "--agentid=", "--lockscreen="]
     },
     {
+      "id": "awesun-dragserver",
+      "processName": "AweSun.exe",
+      "toolName": "向日葵",
+      "remark": "文件拖拽会话（dragserver，新版）",
+      "commandLineArgs": ["--mod=dragserver", "--port=", "--dragid="]
+    },
+    {
+      "id": "sunlogin-client",
       "processName": "sunloginclient.exe",
-      "toolName": "向日葵客户端"
+      "toolName": "向日葵客户端",
+      "remark": "进程存在即判定（待补充更精确特征）"
     },
     {
+      "id": "uu-gameviewer",
       "processName": "GameViewerServer.exe",
       "toolName": "网易UU远程",
+      "remark": "TCP 连接数达到阈值",
       "tcpConnThreshold": 5,
       "useEstablishedOnly": true
     },
     {
+      "id": "asklink",
       "processName": "AskLink.exe",
       "toolName": "AskLink远程",
+      "remark": "UDP 连接数超过阈值",
       "udpConnThreshold": 1
     },
     {
+      "id": "rcclient",
       "processName": "RCClient.exe",
       "toolName": "远程看看",
+      "remark": "会话中出现「聊天」窗口",
       "windowTitle": "聊天"
     }
   ]

@@ -68,6 +68,51 @@
             font-weight: 500;
         }
 
+        /* 顶部常驻的检测规则版本标签；有新规则时高亮并脉动 */
+        .rules-badge {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            margin-right: 12px;
+            padding: 3px 10px;
+            background: rgba(255, 255, 255, 0.12);
+            border-radius: 16px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .rules-badge:hover {
+            background: rgba(255, 255, 255, 0.22);
+        }
+
+        .rules-badge-icon {
+            font-size: 12px;
+        }
+
+        .rules-badge-text {
+            color: rgba(255, 255, 255, 0.85);
+            font-size: 12px;
+        }
+
+        .rules-badge.has-update {
+            background: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%);
+            animation: pulse-rules 2s ease-in-out infinite;
+        }
+
+        .rules-badge.has-update .rules-badge-text {
+            color: #fff;
+            font-weight: 500;
+        }
+
+        @keyframes pulse-rules {
+            0%, 100% {
+                box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.7);
+            }
+            50% {
+                box-shadow: 0 0 0 6px rgba(245, 158, 11, 0);
+            }
+        }
+
         @keyframes pulse {
             0%, 100% {
                 box-shadow: 0 0 0 0 rgba(102, 126, 234, 0.7);
@@ -750,6 +795,10 @@
             <span>远程知道了 · 本机远程控制行为审计</span>
         </div>
         <div class="header-right">
+            <div class="rules-badge" id="headerRulesBadge" onclick="openSettingsModal('tools')" title="检测规则版本，点击管理">
+                <span class="rules-badge-icon">📋</span>
+                <span class="rules-badge-text" id="headerRulesText">规则 -</span>
+            </div>
             <div class="update-notification" id="headerUpdateNotification" onclick="showUpdateDetails()" title="发现新版本，点击查看详情">
                 <span class="update-notification-icon">🎉</span>
                 <span class="update-notification-text">新版本可用</span>
@@ -906,6 +955,30 @@
 
                     <!-- 监控对象 Tab -->
                     <div id="tab-tools" class="tab-pane">
+                        <!-- 检测规则（版本 / 检查更新 / 手工导入 / 回滚） -->
+                        <div class="form-group" style="background:#f9fafb; border:1px solid #e5e7eb; border-radius:8px; padding:12px 14px; margin-bottom:16px;">
+                            <label style="font-size:13px; font-weight:600; color:#1f2937;">检测规则</label>
+                            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                                <span style="font-size:13px; color:#374151;">当前规则版本：<strong id="ruleVersion">-</strong></span>
+                                <span style="font-size:12px; color:#9ca3af;">主程序 v<span id="ruleAppVersion">-</span></span>
+                                <button type="button" class="btn btn-primary" id="checkRulesBtn" onclick="checkRulesUpdate()" style="white-space:nowrap; font-size:12px; padding:4px 12px;">检查更新</button>
+                                <button type="button" class="btn" id="uploadRulesBtn" onclick="uploadRules()" style="white-space:nowrap; font-size:12px; padding:4px 12px;">手工导入</button>
+                            </div>
+                            <div class="help-text">检测规则支持自动更新；内网/离线环境可手工导入规则文件（rules.json）。</div>
+                            <div id="rulesUpdateInfo" style="display:none; margin-top:8px; background:#eff6ff; padding:10px; border-radius:4px; border:1px solid #dbeafe;">
+                                <p id="rulesUpdateText" style="margin:0 0 6px 0; font-size:13px; color:#1e40af;"></p>
+                                <div>
+                                    <button class="action-link" id="rulesApplyBtn" onclick="applyRulesUpdate()">应用</button>
+                                    <button class="action-link" onclick="dismissRulesUpdate()">忽略</button>
+                                </div>
+                            </div>
+                            <div id="rulesMsg" style="display:none; margin-top:6px; font-size:12px;"></div>
+                            <div style="margin-top:10px;">
+                                <label style="font-size:12px; color:#6b7280;">历史版本（可回滚）</label>
+                                <div id="ruleVersionList" style="margin-top:4px;"></div>
+                            </div>
+                        </div>
+
                         <p style="margin: 0 0 12px 0; font-size: 12px; color: #666;">
                             勾选要关注的远程工具；若你的远程软件不在列表里，点「添加远程工具」用快照录制自动识别。
                         </p>
@@ -1049,28 +1122,6 @@
                                 <label for="startupEnabled">开机自动启动</label>
                             </div>
                             <div class="help-text">系统启动时自动运行远程知道了，实时保护您的设备安全</div>
-                        </div>
-                        <div class="form-group">
-                            <label>检测规则</label>
-                            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-                                <span style="font-size:13px; color:#374151;">当前规则版本：<strong id="ruleVersion">-</strong></span>
-                                <span style="font-size:12px; color:#9ca3af;">主程序 v<span id="ruleAppVersion">-</span></span>
-                                <button type="button" class="btn btn-primary" id="checkRulesBtn" onclick="checkRulesUpdate()" style="white-space:nowrap; font-size:12px; padding:4px 12px;">检查更新</button>
-                                <button type="button" class="btn" id="uploadRulesBtn" onclick="uploadRules()" style="white-space:nowrap; font-size:12px; padding:4px 12px;">手工导入</button>
-                            </div>
-                            <div class="help-text">检测规则支持自动更新；内网/离线环境可手工导入规则文件（rules.json）。</div>
-                            <div id="rulesUpdateInfo" style="display:none; margin-top:8px; background:#eff6ff; padding:10px; border-radius:4px; border:1px solid #dbeafe;">
-                                <p id="rulesUpdateText" style="margin:0 0 6px 0; font-size:13px; color:#1e40af;"></p>
-                                <div>
-                                    <button class="action-link" id="rulesApplyBtn" onclick="applyRulesUpdate()">应用</button>
-                                    <button class="action-link" onclick="dismissRulesUpdate()">忽略</button>
-                                </div>
-                            </div>
-                            <div id="rulesMsg" style="display:none; margin-top:6px; font-size:12px;"></div>
-                            <div style="margin-top:10px;">
-                                <label style="font-size:12px; color:#6b7280;">历史版本（可回滚）</label>
-                                <div id="ruleVersionList" style="margin-top:4px;"></div>
-                            </div>
                         </div>
                     </div>
 
@@ -1390,14 +1441,10 @@
             if (tabName === 'general') {
                 loadStartupConfig();
                 loadDeviceName();
-                loadRulesInfo();
-                autoCheckRulesUpdate();
             } else if (tabName === 'notification') {
                 loadNotificationConfig();
             } else if (tabName === 'tools') {
-                resetRecordWizard();
-                loadTools();
-                loadCustomRaw();
+                loadToolsTab();
             }
         }
 
@@ -1433,9 +1480,20 @@
             if (tabName === 'general') {
                 loadStartupConfig();
                 loadDeviceName();
-                loadRulesInfo();
-                autoCheckRulesUpdate();
             }
+
+            if (tabName === 'tools') {
+                loadToolsTab();
+            }
+        }
+
+        // 监控对象页：规则版本 + 工具列表 + 高级编辑器一起加载（切 tab 与顶部标签直达共用）
+        function loadToolsTab() {
+            resetRecordWizard();
+            loadTools();
+            loadCustomRaw();
+            loadRulesInfo();
+            autoCheckRulesUpdate();
         }
 
         function closeSettingsModal() {
@@ -1812,6 +1870,23 @@
 
         // ===== 检测规则更新 =====
         let rulesAutoChecked = false;
+        // 顶部标签状态：当前规则版本 + 是否有可用更新（含更新到哪个版本）
+        const rulesBadgeState = { current: '', latest: '', updateAvailable: false };
+
+        function refreshRulesBadge() {
+            const badge = document.getElementById('headerRulesBadge');
+            const text = document.getElementById('headerRulesText');
+            if (!badge || !text) return;
+            if (rulesBadgeState.updateAvailable) {
+                badge.classList.add('has-update');
+                text.innerText = '规则可更新 v' + rulesBadgeState.latest;
+                badge.title = '发现检测规则新版本 v' + rulesBadgeState.latest + '，点击查看并应用';
+            } else {
+                badge.classList.remove('has-update');
+                text.innerText = '规则 ' + (rulesBadgeState.current ? 'v' + rulesBadgeState.current : '-');
+                badge.title = '检测规则版本，点击管理';
+            }
+        }
 
         function showRulesMsg(text, color) {
             const msg = document.getElementById('rulesMsg');
@@ -1827,6 +1902,8 @@
                 document.getElementById('ruleVersion').innerText = data.currentVersion || '-';
                 document.getElementById('ruleAppVersion').innerText = data.appVersion || '-';
                 renderRuleVersions(data.versions || []);
+                rulesBadgeState.current = data.currentVersion || '';
+                refreshRulesBadge();
             } catch (e) {
                 document.getElementById('ruleVersion').innerText = '加载失败';
             }
@@ -1850,7 +1927,7 @@
             }).join('');
         }
 
-        // 进入通用页时自动静默检查一次（每个会话仅一次，避免频繁请求 GitHub）
+        // 启动及进入监控对象页时自动静默检查一次（每个会话仅一次，避免频繁请求 GitHub）
         function autoCheckRulesUpdate() {
             if (rulesAutoChecked) return;
             rulesAutoChecked = true;
@@ -1869,6 +1946,10 @@
             }
             try {
                 const r = await window.remoteAudit.rulesCheck();
+                rulesBadgeState.updateAvailable = !!r.updateAvailable;
+                rulesBadgeState.latest = r.latestVersion || '';
+                if (r.currentVersion) rulesBadgeState.current = r.currentVersion;
+                refreshRulesBadge();
                 if (!r.updateAvailable) {
                     info.style.display = 'none';
                     if (!silent) showRulesMsg('已是最新版本（v' + (r.currentVersion || '') + '）', '#16a34a');
@@ -1902,6 +1983,7 @@
                 const r = await window.remoteAudit.rulesApply();
                 document.getElementById('rulesUpdateInfo').style.display = 'none';
                 showRulesMsg(r.message || '规则已更新', '#16a34a');
+                rulesBadgeState.updateAvailable = false;
                 loadRulesInfo();
             } catch (e) {
                 showRulesMsg('应用失败：' + e.message, '#dc2626');
@@ -1937,6 +2019,7 @@
                 if (r && r.canceled) return; // 用户取消选择文件
                 showRulesMsg((r && r.message) || '规则已导入', '#16a34a');
                 document.getElementById('rulesUpdateInfo').style.display = 'none';
+                rulesBadgeState.updateAvailable = false;
                 loadRulesInfo();
             } catch (e) {
                 showRulesMsg('导入失败：' + e.message, '#dc2626');
@@ -1970,8 +2053,10 @@
             if (window.remoteAudit) {
                 const version = await window.remoteAudit.getAppVersion();
                 document.getElementById('appVersion').innerText = version;
-                // 初始化后自动静默检查更新
+                // 初始化后自动静默检查更新（主程序 + 检测规则，规则结果反映到顶部标签）
                 checkUpdateSilently();
+                loadRulesInfo();
+                autoCheckRulesUpdate();
             }
         }
 

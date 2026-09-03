@@ -37,80 +37,272 @@
         .header-right {
             display: flex;
             align-items: center;
+            position: relative;
             -webkit-app-region: no-drag;
         }
 
-        .update-notification {
-            display: none;
-            align-items: center;
-            gap: 6px;
-            margin-right: 12px;
-            padding: 4px 10px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            border-radius: 16px;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            animation: pulse 2s ease-in-out infinite;
-        }
-
-        .update-notification:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
-        }
-
-        .update-notification-icon {
-            font-size: 14px;
-        }
-
-        .update-notification-text {
-            color: #fff;
-            font-size: 12px;
-            font-weight: 500;
-        }
-
-        /* 顶部常驻的检测规则版本标签；有新规则时高亮并脉动 */
-        .rules-badge {
+        /* ===== 顶部更新中心：一个入口，平时显示规则版本，有更新时变成「N 项更新」 ===== */
+        .uc-pill {
             display: flex;
             align-items: center;
-            gap: 5px;
+            gap: 6px;
             margin-right: 12px;
             padding: 3px 10px;
             background: rgba(255, 255, 255, 0.12);
             border-radius: 16px;
             cursor: pointer;
-            transition: all 0.2s ease;
+            transition: background 0.2s ease;
+            white-space: nowrap;
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.85);
         }
 
-        .rules-badge:hover {
+        .uc-pill:hover {
             background: rgba(255, 255, 255, 0.22);
         }
 
-        .rules-badge-icon {
-            font-size: 12px;
-        }
-
-        .rules-badge-text {
-            color: rgba(255, 255, 255, 0.85);
-            font-size: 12px;
-        }
-
-        .rules-badge.has-update {
+        .uc-pill.has-update {
             background: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%);
-            animation: pulse-rules 2s ease-in-out infinite;
-        }
-
-        .rules-badge.has-update .rules-badge-text {
             color: #fff;
             font-weight: 500;
+            animation: pulse-uc 2s ease-in-out infinite;
         }
 
-        @keyframes pulse-rules {
+        .uc-pill.busy {
+            background: rgba(255, 255, 255, 0.18);
+            animation: none;
+            cursor: progress;
+        }
+
+        .uc-count {
+            background: #fff;
+            color: #b91c1c;
+            font-weight: 700;
+            font-size: 10px;
+            min-width: 16px;
+            height: 16px;
+            border-radius: 8px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0 4px;
+        }
+
+        .uc-spinner {
+            width: 11px;
+            height: 11px;
+            border-radius: 50%;
+            border: 2px solid rgba(255, 255, 255, 0.35);
+            border-top-color: #fff;
+            animation: uc-spin 0.8s linear infinite;
+            display: inline-block;
+            vertical-align: -2px;
+        }
+
+        .uc-spinner.dark {
+            border-color: rgba(0, 0, 0, 0.15);
+            border-top-color: #374151;
+        }
+
+        @keyframes uc-spin {
+            to { transform: rotate(360deg); }
+        }
+
+        @keyframes pulse-uc {
             0%, 100% {
                 box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.7);
             }
             50% {
                 box-shadow: 0 0 0 6px rgba(245, 158, 11, 0);
             }
+        }
+
+        /* 下拉面板 */
+        .uc-pop {
+            display: none;
+            position: absolute;
+            top: 40px;
+            right: 130px;
+            width: 340px;
+            background: #fff;
+            color: #1f2937;
+            border-radius: 10px;
+            border: 1px solid #e5e7eb;
+            box-shadow: 0 10px 30px rgba(16, 24, 40, 0.18);
+            padding: 12px 14px;
+            z-index: 1000;
+            font-size: 13px;
+            text-align: left;
+        }
+
+        .uc-pop.open {
+            display: block;
+        }
+
+        .uc-pop::before {
+            content: "";
+            position: absolute;
+            top: -6px;
+            right: 40px;
+            width: 10px;
+            height: 10px;
+            background: #fff;
+            border-left: 1px solid #e5e7eb;
+            border-top: 1px solid #e5e7eb;
+            transform: rotate(45deg);
+        }
+
+        .uc-pop h4 {
+            margin: 0 0 4px 0;
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .uc-item {
+            display: grid;
+            grid-template-columns: 22px 1fr auto;
+            gap: 10px;
+            align-items: start;
+            padding: 10px 0;
+            border-top: 1px solid #f3f4f6;
+        }
+
+        .uc-item:first-of-type {
+            border-top: none;
+        }
+
+        .uc-item .uc-ic {
+            font-size: 16px;
+            line-height: 1.3;
+        }
+
+        .uc-item .uc-t {
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .uc-item .uc-ver {
+            color: #6b7280;
+            font-weight: 400;
+            font-size: 12px;
+            font-family: Consolas, Monaco, monospace;
+        }
+
+        .uc-item .uc-d {
+            color: #4b5563;
+            font-size: 12px;
+            margin-top: 2px;
+        }
+
+        .uc-item .uc-d.dep {
+            color: #b45309;
+        }
+
+        .uc-chip {
+            font-size: 11px;
+            padding: 1px 6px;
+            border-radius: 999px;
+            background: #f3f4f6;
+            color: #4b5563;
+            font-weight: 500;
+        }
+
+        .uc-chip.inapp {
+            background: #ecfdf3;
+            color: #16a34a;
+        }
+
+        .uc-chip.done {
+            background: #ecfdf3;
+            color: #16a34a;
+        }
+
+        .uc-btn {
+            font: inherit;
+            font-size: 12px;
+            padding: 5px 12px;
+            border-radius: 6px;
+            border: 1px solid #d1d5db;
+            background: #fff;
+            color: #1f2937;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+
+        .uc-btn.primary {
+            background: #2563eb;
+            border-color: #2563eb;
+            color: #fff;
+        }
+
+        .uc-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .uc-foot {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-top: 1px solid #f3f4f6;
+            padding-top: 8px;
+            margin-top: 4px;
+            color: #9ca3af;
+            font-size: 12px;
+        }
+
+        .uc-foot a {
+            color: #3b82f6;
+            text-decoration: none;
+            cursor: pointer;
+        }
+
+        /* 顶部提示条 */
+        .uc-toast-wrap {
+            position: fixed;
+            top: 58px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            z-index: 3000;
+            pointer-events: none;
+        }
+
+        .uc-toast {
+            background: #1f2937;
+            color: #fff;
+            padding: 8px 14px;
+            border-radius: 8px;
+            font-size: 13px;
+            box-shadow: 0 10px 30px rgba(16, 24, 40, 0.25);
+            opacity: 0;
+            transform: translateY(-6px);
+            transition: opacity 0.2s, transform 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .uc-toast.show {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .uc-toast.ok::before {
+            content: "✓";
+            color: #4ade80;
+            font-weight: 700;
+        }
+
+        .uc-toast.warn::before {
+            content: "!";
+            color: #fbbf24;
+            font-weight: 700;
         }
 
         @keyframes pulse {
@@ -795,13 +987,18 @@
             <span>远程知道了 · 本机远程控制行为审计</span>
         </div>
         <div class="header-right">
-            <div class="rules-badge" id="headerRulesBadge" onclick="openSettingsModal('tools')" title="检测规则版本，点击管理">
-                <span class="rules-badge-icon">📋</span>
-                <span class="rules-badge-text" id="headerRulesText">规则 -</span>
+            <!-- 更新中心：主程序 + 检测规则统一入口 -->
+            <div class="uc-pill" id="ucPill" onclick="toggleUpdateCenter(event)" title="更新与检测规则版本">
+                <span id="ucIcon">📋</span>
+                <span id="ucText">规则 -</span>
             </div>
-            <div class="update-notification" id="headerUpdateNotification" onclick="showUpdateDetails()" title="发现新版本，点击查看详情">
-                <span class="update-notification-icon">🎉</span>
-                <span class="update-notification-text">新版本可用</span>
+            <div class="uc-pop" id="ucPop" onclick="event.stopPropagation()">
+                <h4 id="ucTitle">版本</h4>
+                <div id="ucList"></div>
+                <div class="uc-foot">
+                    <span id="ucFoot">尚未检查</span>
+                    <a id="ucCheckLink" onclick="ucCheckNow()">立即检查</a>
+                </div>
             </div>
             <button class="settings-btn" onclick="openSettingsModal()" title="系统设置">⚙️</button>
             <button class="window-btn" onclick="window.remoteAudit.minimize()">─</button>
@@ -809,6 +1006,8 @@
             <button class="window-btn close" onclick="window.remoteAudit.close()">✕</button>
         </div>
     </header>
+
+    <div class="uc-toast-wrap" id="ucToastWrap"></div>
 
     <!-- 系统设置模态框 -->
     <div id="settingsModal" class="modal">
@@ -1869,23 +2068,200 @@
         });
 
         // ===== 检测规则更新 =====
-        let rulesAutoChecked = false;
-        // 顶部标签状态：当前规则版本 + 是否有可用更新（含更新到哪个版本）
-        const rulesBadgeState = { current: '', latest: '', updateAvailable: false };
 
-        function refreshRulesBadge() {
-            const badge = document.getElementById('headerRulesBadge');
-            const text = document.getElementById('headerRulesText');
-            if (!badge || !text) return;
-            if (rulesBadgeState.updateAvailable) {
-                badge.classList.add('has-update');
-                text.innerText = '规则可更新 v' + rulesBadgeState.latest;
-                badge.title = '发现检测规则新版本 v' + rulesBadgeState.latest + '，点击查看并应用';
+        // ----- 顶部更新中心：主程序 + 检测规则的统一状态 -----
+        const UC_AUTO_INTERVAL_MS = 60 * 60 * 1000;   // 每小时自动检查一次
+        const UC_TAB_RECHECK_MS = 10 * 60 * 1000;     // 进入监控对象页时，距上次检查超过 10 分钟再查
+        const uc = {
+            app:   { current: '', latest: '', url: '', available: false },
+            rules: { current: '', latest: '', updateAvailable: false, requiresAppUpgrade: false, requiredAppVersion: '', description: '' },
+            busy: false,
+            lastCheck: 0
+        };
+
+        function ucStripV(v) { return String(v || '').replace(/^v/, ''); }
+
+        function ucSetApp(tag, url) {
+            uc.app.latest = ucStripV(tag);
+            uc.app.url = url || '';
+            uc.app.available = true;
+            renderUpdateCenter();
+        }
+
+        function ucClearApp() {
+            uc.app.available = false;
+            renderUpdateCenter();
+        }
+
+        function ucItems() {
+            const dep = uc.rules.updateAvailable && uc.rules.requiresAppUpgrade;
+            const rules = {
+                key: 'rules', ic: '📋', title: '检测规则',
+                from: uc.rules.current || '-', to: uc.rules.latest,
+                up: uc.rules.updateAvailable, dep,
+                desc: uc.rules.updateAvailable
+                    ? (dep
+                        ? '需先升级主程序到 v' + uc.rules.requiredAppVersion + '（当前 v' + (uc.app.current || '-') + '），之后会自动提示'
+                        : (uc.rules.description ? uc.rules.description + '。' : '') + '更新立即生效，可在监控对象页回滚')
+                    : '已是最新',
+                chip: '应用内更新', btn: dep ? '等待主程序' : '立即更新'
+            };
+            const app = {
+                key: 'app', ic: '🎉', title: '主程序',
+                from: uc.app.current || '-', to: uc.app.latest,
+                up: uc.app.available, dep: false,
+                desc: uc.app.available ? '需要下载安装包重新安装' : '已是最新',
+                chip: '前往网页', btn: '前往下载 ↗'
+            };
+            // 规则依赖新主程序时主程序排前；否则能当场做完的规则排前
+            return dep ? [app, rules] : [rules, app];
+        }
+
+        function renderUpdateCenter() {
+            const pill = document.getElementById('ucPill');
+            const icon = document.getElementById('ucIcon');
+            const text = document.getElementById('ucText');
+            const list = document.getElementById('ucList');
+            const title = document.getElementById('ucTitle');
+            if (!pill || !icon || !text || !list) return;
+
+            const items = ucItems();
+            const n = items.filter(i => i.up).length;
+            const dep = uc.rules.updateAvailable && uc.rules.requiresAppUpgrade;
+
+            pill.className = 'uc-pill';
+            if (uc.busy) {
+                pill.classList.add('busy');
+                icon.innerHTML = '<span class="uc-spinner"></span>';
+                text.innerText = '规则更新中…';
+                pill.title = '正在更新检测规则';
+            } else if (n > 0) {
+                pill.classList.add('has-update');
+                icon.innerHTML = '<span class="uc-count">' + n + '</span>';
+                text.innerText = dep ? '有更新 · 需升级主程序' : n + ' 项更新';
+                pill.title = '发现 ' + n + ' 项可用更新，点击查看';
             } else {
-                badge.classList.remove('has-update');
-                text.innerText = '规则 ' + (rulesBadgeState.current ? 'v' + rulesBadgeState.current : '-');
-                badge.title = '检测规则版本，点击管理';
+                icon.innerText = '📋';
+                text.innerText = '规则 ' + (uc.rules.current ? 'v' + uc.rules.current : '-');
+                pill.title = '更新与检测规则版本';
             }
+            if (title) title.innerText = n > 0 ? '可用更新' : '版本';
+
+            list.innerHTML = items.map(i => {
+                const ver = i.up
+                    ? '<span class="uc-ver">v' + toolsEscape(i.from) + ' → v' + toolsEscape(i.to) + '</span>'
+                    : '<span class="uc-ver">v' + toolsEscape(i.from) + '</span>';
+                const chip = i.up ? '<span class="uc-chip ' + (i.key === 'rules' ? 'inapp' : '') + '">' + i.chip + '</span>' : '';
+                let action = '';
+                if (i.up) {
+                    if (i.key === 'rules') {
+                        action = uc.busy
+                            ? '<button class="uc-btn" disabled><span class="uc-spinner dark"></span> 更新中</button>'
+                            : '<button class="uc-btn ' + (i.dep ? '' : 'primary') + '" ' + (i.dep ? 'disabled' : '') + ' onclick="ucApplyRules()">' + i.btn + '</button>';
+                    } else {
+                        action = '<button class="uc-btn primary" onclick="ucOpenDownload()">' + i.btn + '</button>';
+                    }
+                }
+                return '<div class="uc-item">'
+                    + '<div class="uc-ic">' + i.ic + '</div>'
+                    + '<div><div class="uc-t">' + i.title + ' ' + ver + ' ' + chip + '</div>'
+                    + '<div class="uc-d ' + (i.dep ? 'dep' : '') + '">' + toolsEscape(i.desc) + '</div></div>'
+                    + '<div>' + action + '</div>'
+                    + '</div>';
+            }).join('');
+
+            const foot = document.getElementById('ucFoot');
+            if (foot) {
+                if (uc.lastCheck) {
+                    const d = new Date(uc.lastCheck);
+                    const hh = String(d.getHours()).padStart(2, '0');
+                    const mm = String(d.getMinutes()).padStart(2, '0');
+                    foot.innerText = '上次检查 ' + hh + ':' + mm + ' · 每小时自动检查';
+                } else {
+                    foot.innerText = '尚未检查 · 每小时自动检查';
+                }
+            }
+        }
+
+        function toggleUpdateCenter(e) {
+            if (e) e.stopPropagation();
+            const pop = document.getElementById('ucPop');
+            if (!pop) return;
+            const willOpen = !pop.classList.contains('open');
+            pop.classList.toggle('open', willOpen);
+            if (willOpen) renderUpdateCenter();
+        }
+
+        function closeUpdateCenter() {
+            const pop = document.getElementById('ucPop');
+            if (pop) pop.classList.remove('open');
+        }
+
+        // 点面板和标签之外的地方关闭面板
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('#ucPop') && !e.target.closest('#ucPill')) closeUpdateCenter();
+        });
+
+        function showToast(text, kind) {
+            const wrap = document.getElementById('ucToastWrap');
+            if (!wrap) return;
+            const el = document.createElement('div');
+            el.className = 'uc-toast ' + (kind || 'ok');
+            el.textContent = text;
+            wrap.appendChild(el);
+            requestAnimationFrame(() => el.classList.add('show'));
+            setTimeout(() => { el.classList.remove('show'); setTimeout(() => el.remove(), 250); }, 3200);
+        }
+
+        // 面板里的「立即更新」：直接应用规则更新，热生效
+        async function ucApplyRules() {
+            if (uc.busy || !window.remoteAudit || !window.remoteAudit.rulesApply) return;
+            uc.busy = true;
+            renderUpdateCenter();
+            try {
+                const r = await window.remoteAudit.rulesApply();
+                uc.rules.updateAvailable = false;
+                uc.rules.requiresAppUpgrade = false;
+                if (uc.rules.latest) uc.rules.current = uc.rules.latest;
+                showToast((r && r.message) || ('检测规则已更新到 v' + uc.rules.current), 'ok');
+                const info = document.getElementById('rulesUpdateInfo');
+                if (info) info.style.display = 'none';
+                loadRulesInfo();
+                // 监控对象页若已打开，工具列表同步刷新
+                const toolsPane = document.getElementById('tab-tools');
+                if (toolsPane && toolsPane.classList.contains('active')) loadTools();
+            } catch (e) {
+                showToast('规则更新失败：' + e.message, 'warn');
+            } finally {
+                uc.busy = false;
+                renderUpdateCenter();
+            }
+        }
+
+        function ucOpenDownload() {
+            closeUpdateCenter();
+            const url = uc.app.url || latestDownloadUrl || 'https://github.com/samwafgo/RemoteKnown/releases';
+            openExternal(url);
+        }
+
+        // 面板里的「立即检查」：主程序和规则一起查
+        async function ucCheckNow() {
+            const link = document.getElementById('ucCheckLink');
+            if (link) link.innerText = '检查中…';
+            try {
+                await Promise.all([checkUpdateSilently(), checkRulesUpdate(true)]);
+                const n = ucItems().filter(i => i.up).length;
+                showToast(n > 0 ? '检查完成，有 ' + n + ' 项可用更新' : '已是最新版本', 'ok');
+            } finally {
+                if (link) link.innerText = '立即检查';
+                renderUpdateCenter();
+            }
+        }
+
+        // 定时静默检查（主程序 + 规则）
+        function ucAutoCheck() {
+            checkUpdateSilently();
+            checkRulesUpdate(true);
         }
 
         function showRulesMsg(text, color) {
@@ -1902,8 +2278,9 @@
                 document.getElementById('ruleVersion').innerText = data.currentVersion || '-';
                 document.getElementById('ruleAppVersion').innerText = data.appVersion || '-';
                 renderRuleVersions(data.versions || []);
-                rulesBadgeState.current = data.currentVersion || '';
-                refreshRulesBadge();
+                uc.rules.current = data.currentVersion || '';
+                if (data.appVersion) uc.app.current = ucStripV(data.appVersion);
+                renderUpdateCenter();
             } catch (e) {
                 document.getElementById('ruleVersion').innerText = '加载失败';
             }
@@ -1927,10 +2304,9 @@
             }).join('');
         }
 
-        // 启动及进入监控对象页时自动静默检查一次（每个会话仅一次，避免频繁请求 GitHub）
+        // 进入监控对象页时顺手查一次，但距上次检查不足 10 分钟就跳过，避免频繁请求 GitHub
         function autoCheckRulesUpdate() {
-            if (rulesAutoChecked) return;
-            rulesAutoChecked = true;
+            if (uc.lastCheck && Date.now() - uc.lastCheck < UC_TAB_RECHECK_MS) return;
             checkRulesUpdate(true);
         }
 
@@ -1946,10 +2322,15 @@
             }
             try {
                 const r = await window.remoteAudit.rulesCheck();
-                rulesBadgeState.updateAvailable = !!r.updateAvailable;
-                rulesBadgeState.latest = r.latestVersion || '';
-                if (r.currentVersion) rulesBadgeState.current = r.currentVersion;
-                refreshRulesBadge();
+                uc.lastCheck = Date.now();
+                uc.rules.updateAvailable = !!r.updateAvailable;
+                uc.rules.latest = r.latestVersion || '';
+                uc.rules.requiresAppUpgrade = !!r.requiresAppUpgrade;
+                uc.rules.requiredAppVersion = r.requiredAppVersion || '';
+                uc.rules.description = r.description || '';
+                if (r.currentVersion) uc.rules.current = r.currentVersion;
+                if (r.appVersion) uc.app.current = ucStripV(r.appVersion);
+                renderUpdateCenter();
                 if (!r.updateAvailable) {
                     info.style.display = 'none';
                     if (!silent) showRulesMsg('已是最新版本（v' + (r.currentVersion || '') + '）', '#16a34a');
@@ -1983,7 +2364,9 @@
                 const r = await window.remoteAudit.rulesApply();
                 document.getElementById('rulesUpdateInfo').style.display = 'none';
                 showRulesMsg(r.message || '规则已更新', '#16a34a');
-                rulesBadgeState.updateAvailable = false;
+                uc.rules.updateAvailable = false;
+                uc.rules.requiresAppUpgrade = false;
+                renderUpdateCenter();
                 loadRulesInfo();
             } catch (e) {
                 showRulesMsg('应用失败：' + e.message, '#dc2626');
@@ -2019,7 +2402,9 @@
                 if (r && r.canceled) return; // 用户取消选择文件
                 showRulesMsg((r && r.message) || '规则已导入', '#16a34a');
                 document.getElementById('rulesUpdateInfo').style.display = 'none';
-                rulesBadgeState.updateAvailable = false;
+                uc.rules.updateAvailable = false;
+                uc.rules.requiresAppUpgrade = false;
+                renderUpdateCenter();
                 loadRulesInfo();
             } catch (e) {
                 showRulesMsg('导入失败：' + e.message, '#dc2626');
@@ -2053,10 +2438,11 @@
             if (window.remoteAudit) {
                 const version = await window.remoteAudit.getAppVersion();
                 document.getElementById('appVersion').innerText = version;
-                // 初始化后自动静默检查更新（主程序 + 检测规则，规则结果反映到顶部标签）
-                checkUpdateSilently();
+                uc.app.current = ucStripV(version);
+                // 启动后静默检查一次（主程序 + 检测规则），之后每小时一次；结果反映到顶部更新中心
                 loadRulesInfo();
-                autoCheckRulesUpdate();
+                ucAutoCheck();
+                setInterval(ucAutoCheck, UC_AUTO_INTERVAL_MS);
             }
         }
 
@@ -2072,9 +2458,8 @@
                         const comparison = compareVersions(latestVer, currentVersion);
                         
                         if (comparison > 0) {
-                            // 有新版本，显示header通知
-                            const headerNotification = document.getElementById('headerUpdateNotification');
-                            headerNotification.style.display = 'flex';
+                            // 有新版本，进顶部更新中心
+                            ucSetApp(result.tag_name, result.html_url);
                             
                             // 保存版本信息供后续使用
                             window.latestVersionInfo = {
@@ -2136,7 +2521,6 @@
             const link = document.getElementById('checkUpdateLink');
             const info = document.getElementById('updateInfo');
             const badge = document.getElementById('updateBadge');
-            const headerNotification = document.getElementById('headerUpdateNotification');
 
             link.innerText = '正在检查...';
             link.style.pointerEvents = 'none';
@@ -2161,8 +2545,8 @@
                             latestDownloadUrl = result.html_url;
                             link.innerText = '发现新版本';
                             
-                            // 同时显示header通知
-                            headerNotification.style.display = 'flex';
+                            // 同步到顶部更新中心
+                            ucSetApp(result.tag_name, result.html_url);
                             window.latestVersionInfo = {
                                 version: result.tag_name,
                                 url: result.html_url
@@ -2170,8 +2554,8 @@
                         } else {
                             link.innerText = '当前已是最新版本';
                             setTimeout(() => { link.innerText = '检查更新'; }, 2000);
-                            // 隐藏header通知
-                            headerNotification.style.display = 'none';
+                            // 顶部更新中心撤掉主程序条目
+                            ucClearApp();
                         }
                     } else {
                         link.innerText = '暂无更新';

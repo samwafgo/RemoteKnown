@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <!-- 密码窗口不需要任何外部资源，除内联脚本/样式外全部禁掉 -->
+    <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'">
+    <title>需要验证</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+            font-size: 12.5px;
+            color: #1b2026;
+            background: #fbfbfc;
+            border: 1px solid #c9ced5;
+            border-radius: 7px;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        .bar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            height: 32px;
+            padding: 0 4px 0 11px;
+            background: #f1f3f6;
+            border-bottom: 1px solid #dee2e7;
+            font-size: 12px;
+            font-weight: 500;
+            -webkit-app-region: drag;
+        }
+
+        .bar .grow {
+            flex: 1;
+        }
+
+        .bar .x {
+            width: 32px;
+            height: 26px;
+            display: grid;
+            place-items: center;
+            border-radius: 4px;
+            cursor: pointer;
+            color: #5a646f;
+            -webkit-app-region: no-drag;
+        }
+
+        .bar .x:hover {
+            background: #e4262c;
+            color: #fff;
+        }
+
+        .body {
+            padding: 15px 17px 16px;
+        }
+
+        h1 {
+            font-size: 13px;
+            font-weight: 600;
+            margin: 0 0 3px;
+        }
+
+        .sub {
+            margin: 0 0 12px;
+            color: #5a646f;
+            font-size: 11.5px;
+            line-height: 1.5;
+        }
+
+        input {
+            width: 100%;
+            height: 32px;
+            border: 1px solid #dee2e7;
+            border-radius: 5px;
+            padding: 0 10px;
+            font: inherit;
+            font-size: 13px;
+            letter-spacing: .18em;
+            background: #fff;
+            color: #1b2026;
+            user-select: text;
+        }
+
+        input+input {
+            margin-top: 8px;
+        }
+
+        input:focus {
+            outline: 2px solid #2563c9;
+            outline-offset: -1px;
+            border-color: #2563c9;
+        }
+
+        input.bad {
+            border-color: #d0353c;
+            box-shadow: 0 0 0 2px rgba(208, 53, 60, .14);
+        }
+
+        input.plain {
+            letter-spacing: .08em;
+            font-family: Consolas, "Courier New", monospace;
+        }
+
+        .msg {
+            font-size: 11.5px;
+            margin: 9px 0 0;
+            min-height: 17px;
+            color: #d0353c;
+            line-height: 1.5;
+        }
+
+        .msg.ok {
+            color: #158a56;
+        }
+
+        .foot {
+            display: flex;
+            align-items: center;
+            margin-top: 13px;
+            gap: 8px;
+        }
+
+        .push {
+            margin-left: auto;
+        }
+
+        button {
+            font: inherit;
+            font-size: 12px;
+            padding: 6px 15px;
+            border-radius: 5px;
+            cursor: pointer;
+            border: 1px solid #dee2e7;
+            background: #fbfbfc;
+            color: #1b2026;
+        }
+
+        button:hover:not(:disabled) {
+            background: #eef1f5;
+        }
+
+        button.primary {
+            background: #2563c9;
+            border-color: #2563c9;
+            color: #fff;
+        }
+
+        button.primary:hover:not(:disabled) {
+            background: #1e56b0;
+        }
+
+        button:disabled {
+            opacity: .45;
+            cursor: not-allowed;
+        }
+
+        .link {
+            background: none;
+            border: 0;
+            padding: 0;
+            font-size: 11.5px;
+            color: #2563c9;
+            text-decoration: underline;
+            text-underline-offset: 2px;
+        }
+
+        .link:hover {
+            background: none;
+        }
+
+        .choice {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .choice button {
+            text-align: left;
+            padding: 9px 12px;
+            line-height: 1.5;
+        }
+
+        .choice button span {
+            display: block;
+            font-size: 11px;
+            opacity: .8;
+            font-weight: 400;
+        }
+
+        .rec {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 9px;
+            margin: 4px 0 0;
+            padding: 10px;
+            background: #fdf6e7;
+            border: 1px solid #ebd9af;
+            border-radius: 6px;
+            font-family: Consolas, "Courier New", monospace;
+            font-size: 15px;
+            letter-spacing: .06em;
+            color: #9a6a12;
+            user-select: text;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="bar"><span id="barIcon">🔒</span><span id="barTitle">需要验证</span><span class="grow"></span>
+        <span class="x" id="btnClose">✕</span>
+    </div>
+    <div class="body" id="view"></div>
+
+    <script>
+        const api = window.remoteAudit;
+        const view = document.getElementById('view');
+        const barTitle = document.getElementById('barTitle');
+        const barIcon = document.getElementById('barIcon');
+
+        // 由主进程通过 query 传入本次要做的操作，用于文案与告警。
+        const params = new URLSearchParams(location.search);
+        const ACTION = params.get('action') || 'verify';
+        const ACTION_LABEL = {
+            quit: '退出程序',
+            show: '显示主窗口',
+            status: '查看状态',
+            options: '修改安全设置'
+        }[ACTION] || '继续操作';
+
+        let busy = false;
+
+        function fit() {
+            // 内容高度变化时让主进程调整窗口，避免固定高度挤压或留白
+            api.unlockResize(document.body.scrollHeight);
+        }
+
+        function esc(s) {
+            return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+        }
+
+        function setMsg(text, ok) {
+            const el = document.getElementById('msg');
+            if (!el) return;
+            el.className = 'msg' + (ok ? ' ok' : '');
+            el.textContent = text || '';
+        }
+
+        function shake() {
+            const f = document.getElementById('f1');
+            if (f) { f.classList.add('bad'); f.value = ''; f.focus(); }
+        }
+
+        // ---------- 步骤：输入密码 ----------
+        function renderVerify(lockedMsg) {
+            barIcon.textContent = '🔒';
+            barTitle.textContent = '需要验证';
+            view.innerHTML = `
+                <h1>请输入保护密码</h1>
+                <p class="sub">操作：${esc(ACTION_LABEL)}</p>
+                <input id="f1" type="password" placeholder="密码" autocomplete="off">
+                <p class="msg" id="msg">${esc(lockedMsg || '')}</p>
+                <div class="foot">
+                    <button class="link" id="forgot">忘记密码？</button>
+                    <span class="push"></span>
+                    <button id="cancel">取消</button>
+                    <button class="primary" id="ok">确定</button>
+                </div>`;
+            const f1 = document.getElementById('f1');
+            f1.focus();
+            f1.addEventListener('keydown', e => { if (e.key === 'Enter') doVerify(); });
+            f1.addEventListener('input', () => f1.classList.remove('bad'));
+            document.getElementById('ok').onclick = doVerify;
+            document.getElementById('cancel').onclick = () => api.unlockCancel();
+            document.getElementById('forgot').onclick = () => renderResetPick();
+            fit();
+        }
+
+        async function doVerify() {
+            if (busy) return;
+            const f1 = document.getElementById('f1');
+            const pw = f1.value;
+            if (!pw) { setMsg('请输入密码'); return; }
+            busy = true;
+            document.getElementById('ok').disabled = true;
+            try {
+                const r = await api.securityVerify(pw, ACTION_LABEL);
+                setMsg('✓ 验证通过', true);
+                setTimeout(() => api.unlockDone(r.token), 220);
+            } catch (e) {
+                setMsg(e.message || '密码错误');
+                shake();
+                document.getElementById('ok').disabled = false;
+            } finally {
+                busy = false;
+            }
+        }
+
+        // ---------- 步骤：选择重置方式 ----------
+        function renderResetPick() {
+            barIcon.textContent = '🔑';
+            barTitle.textContent = '重置密码';
+            view.innerHTML = `
+                <h1>重置保护密码</h1>
+                <p class="sub">两条路都不经过这块屏幕，远程的人拿不到。</p>
+                <div class="choice">
+                    <button class="primary" id="byCode">① 发送验证码到我的通知渠道<span>飞书 / 钉钉 / 邮件，需已在设置里配好</span></button>
+                    <button id="byRec">② 使用恢复码<span>设置密码时让你抄下来的那串 RK-…</span></button>
+                </div>
+                <p class="msg" id="msg"></p>
+                <div class="foot">
+                    <button class="link" id="back">返回输入密码</button>
+                    <span class="push"></span>
+                    <button id="cancel">取消</button>
+                </div>`;
+            document.getElementById('byCode').onclick = sendCode;
+            document.getElementById('byRec').onclick = () => renderResetInput('rec');
+            document.getElementById('back').onclick = () => renderVerify();
+            document.getElementById('cancel').onclick = () => api.unlockCancel();
+            fit();
+        }
+
+        async function sendCode() {
+            if (busy) return;
+            busy = true;
+            const btn = document.getElementById('byCode');
+            btn.disabled = true;
+            setMsg('正在发送…', true);
+            try {
+                await api.securityResetRequest();
+                renderResetInput('code');
+            } catch (e) {
+                setMsg(e.message || '发送失败');
+                btn.disabled = false;
+            } finally {
+                busy = false;
+            }
+        }
+
+        // ---------- 步骤：输入验证码 / 恢复码 ----------
+        let resetProof = null; // {code} 或 {recovery_code}
+
+        function renderResetInput(kind) {
+            const isCode = kind === 'code';
+            barIcon.textContent = '🔑';
+            barTitle.textContent = '重置密码';
+            view.innerHTML = `
+                <h1>${isCode ? '输入验证码' : '输入恢复码'}</h1>
+                <p class="sub">${isCode
+                    ? '验证码已发到你配置的通知渠道，5 分钟内有效。'
+                    : '格式 RK-XXXX-XXXX-XXXX，大小写和连字符都可以忽略。'}</p>
+                <input id="f1" class="${isCode ? '' : 'plain'}" placeholder="${isCode ? '6 位数字' : 'RK-____-____-____'}"
+                       ${isCode ? 'inputmode="numeric" maxlength="6"' : ''} autocomplete="off">
+                <p class="msg" id="msg"></p>
+                <div class="foot">
+                    <button class="link" id="back">换一种方式</button>
+                    <span class="push"></span>
+                    <button id="cancel">取消</button>
+                    <button class="primary" id="ok">下一步</button>
+                </div>`;
+            const f1 = document.getElementById('f1');
+            f1.focus();
+            f1.addEventListener('keydown', e => { if (e.key === 'Enter') next(); });
+            document.getElementById('back').onclick = () => renderResetPick();
+            document.getElementById('cancel').onclick = () => api.unlockCancel();
+            document.getElementById('ok').onclick = next;
+            fit();
+
+            function next() {
+                const v = f1.value.trim();
+                if (!v) { setMsg(isCode ? '请输入验证码' : '请输入恢复码'); return; }
+                resetProof = isCode ? { code: v } : { recovery_code: v };
+                renderNewPassword();
+            }
+        }
+
+        // ---------- 步骤：设置新密码 ----------
+        function renderNewPassword() {
+            barIcon.textContent = '🔑';
+            barTitle.textContent = '重置密码';
+            view.innerHTML = `
+                <h1>设置新密码</h1>
+                <p class="sub">至少 4 位。旧的解锁状态会全部作废。</p>
+                <input id="f1" type="password" placeholder="新密码" autocomplete="off">
+                <input id="f2" type="password" placeholder="确认新密码" autocomplete="off">
+                <p class="msg" id="msg"></p>
+                <div class="foot">
+                    <button class="link" id="back">上一步</button>
+                    <span class="push"></span>
+                    <button id="cancel">取消</button>
+                    <button class="primary" id="ok">完成</button>
+                </div>`;
+            const f1 = document.getElementById('f1'), f2 = document.getElementById('f2');
+            f1.focus();
+            f2.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
+            document.getElementById('back').onclick = () => renderResetPick();
+            document.getElementById('cancel').onclick = () => api.unlockCancel();
+            document.getElementById('ok').onclick = submit;
+            fit();
+
+            async function submit() {
+                if (busy) return;
+                if (f1.value.length < 4) { setMsg('密码至少 4 位'); return; }
+                if (f1.value !== f2.value) { setMsg('两次输入的密码不一致'); return; }
+                busy = true;
+                document.getElementById('ok').disabled = true;
+                try {
+                    const r = await api.securityResetConfirm(
+                        Object.assign({ new_password: f1.value }, resetProof));
+                    if (r && r.recovery_code) renderFreshRecovery(r.recovery_code);
+                    else renderDone();
+                } catch (e) {
+                    setMsg(e.message || '重置失败');
+                    document.getElementById('ok').disabled = false;
+                } finally {
+                    busy = false;
+                }
+            }
+        }
+
+        // 用恢复码重置后会换发新的恢复码，必须让机主重新保存。
+        function renderFreshRecovery(code) {
+            view.innerHTML = `
+                <h1>新的恢复码</h1>
+                <p class="sub">刚才那张已经用掉了。请截图或抄下这一张，<b>只显示这一次</b>。</p>
+                <div class="rec" id="rec">${esc(code)}</div>
+                <p class="msg" id="msg"></p>
+                <div class="foot"><span class="push"></span><button class="primary" id="ok">我已保存</button></div>`;
+            document.getElementById('ok').onclick = () => renderDone();
+            fit();
+        }
+
+        function renderDone() {
+            view.innerHTML = `
+                <h1>密码已重置</h1>
+                <p class="sub">现在可以用新密码继续「${esc(ACTION_LABEL)}」了。</p>
+                <div class="foot"><span class="push"></span><button class="primary" id="ok">去输入密码</button></div>`;
+            document.getElementById('ok').onclick = () => renderVerify();
+            fit();
+        }
+
+        document.getElementById('btnClose').onclick = () => api.unlockCancel();
+        document.addEventListener('keydown', e => { if (e.key === 'Escape') api.unlockCancel(); });
+
+        // 若当前正处于锁定期，一进来就把话说清楚
+        (async () => {
+            try {
+                const st = await api.securityGetState();
+                if (st && st.locked) {
+                    renderVerify('🚫 尝试次数过多，已锁定。锁定期间后台检测照常运行。');
+                    document.getElementById('f1').disabled = true;
+                    document.getElementById('ok').disabled = true;
+                    return;
+                }
+            } catch (e) { /* 后端未就绪时按正常流程走 */ }
+            renderVerify();
+        })();
+    </script>
+</body>
+
+</html>

@@ -183,6 +183,50 @@ func (n *Notifier) NotifyAppExit() {
 	}
 }
 
+// NotifySecurityEvent 发送安全事件通知（密码错误、退出、重置等）。
+// lines 是已经排好版的"键：值"明细，按传入顺序展示。
+func (n *Notifier) NotifySecurityEvent(title string, lines []string) {
+	config, err := n.getConfig()
+	if err != nil || !config.Enabled {
+		log.Printf("[通知器] 通知未启用，安全事件未外发: %s", title)
+		return
+	}
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "主机：%s\n\n", n.getDeviceName())
+	for _, line := range lines {
+		sb.WriteString(line)
+		sb.WriteString("\n")
+	}
+	fmt.Fprintf(&sb, "\n时间：%s", time.Now().Format("2006-01-02 15:04:05"))
+
+	if err := n.sendNotification(config, "🔒 "+title, sb.String()); err != nil {
+		log.Printf("[通知器] 发送安全事件通知失败: %v", err)
+	} else {
+		log.Printf("[通知器] 安全事件通知已发送: %s", title)
+	}
+}
+
+// SendResetCode 把密码重置验证码发到已配置的通知渠道。
+// 验证码只出现在机主的手机上，不会出现在被远程的那块屏幕上。
+func (n *Notifier) SendResetCode(code string, ttlMinutes int) error {
+	config, err := n.getConfig()
+	if err != nil {
+		return fmt.Errorf("读取通知配置失败: %w", err)
+	}
+	if !config.Enabled {
+		return fmt.Errorf("尚未启用通知渠道")
+	}
+
+	content := fmt.Sprintf("主机：%s\n\n验证码：%s\n有效期：%d 分钟\n\n注意：若不是你本人操作，说明有人正在尝试接管这台机器\n\n时间：%s",
+		n.getDeviceName(),
+		code,
+		ttlMinutes,
+		time.Now().Format("2006-01-02 15:04:05"))
+
+	return n.sendNotification(config, "🔑 密码重置验证码", content)
+}
+
 // SendTestNotification 发送测试通知
 func (n *Notifier) SendTestNotification(config NotificationConfig) error {
 	title := "🧪 测试通知"

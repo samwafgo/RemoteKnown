@@ -52,10 +52,25 @@ function setStartupEnabled(enabled) {
 
 let mainWindow;
 let tray = null;
-let isQuitting = false;
+let isQuitting = false;  // 允许窗口真正关闭（而不是隐藏到托盘）
+let exitHandled = false; // 退出通知流程是否已经跑过，防止重入
 let backendProcess = null;
 let lastRemoteStatus = false; // 记录上一次的远程状态
 let currentSessionStartTime = null; // 记录当前会话开始时间
+
+// --- 密码保护 ---
+// securityState 由 2 秒轮询刷新，托盘闸门与静默通知都读它。
+let securityState = { enabled: false, has_password: false, silent_local: true, lock_tray: true };
+let unlockWindow = null;
+let unlockPending = null;   // { resolve } —— 等待解锁小窗给出结果
+let lastUnlockToken = null; // 最近一次验证通过的令牌，供"修改安全设置"复用
+let securityStateLoaded = false; // 是否已经成功读到过一次安全状态
+let initialShowDone = false;
+// 守护进程被杀 -> 界面拉起来之后补一条告警（每次运行只报一次，避免刷屏）
+let backendStartedAt = 0;
+let backendDiedUnexpectedly = false;
+let backendDeathReported = false;
+let backendStarting = false;   // 探活是异步的，防止并发起两个守护进程
 
 // --- 单实例锁逻辑 ---
 const gotTheLock = app.requestSingleInstanceLock();
@@ -63,13 +78,14 @@ const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
     app.quit();
 } else {
-    app.on('second-instance', (event, commandLine, workingDirectory) => {
-        // 当运行第二个实例时,将焦点集中到主窗口
-        if (mainWindow) {
-            if (mainWindow.isMinimized()) mainWindow.restore();
-            mainWindow.show();
-            mainWindow.focus();
-        }
+    app.on('second-instance', async (event, commandLine, workingDirectory) => {
+        // 当运行第二个实例时,将焦点集中到主窗口。
+        // 再次启动本程序同样等于"显示主窗口"，闸门不能从这里绕过去。
+        if (!mainWindow) return;
+        if (!mainWindow.isVisible() && !await requireUnlock('show')) return;
+        if (mainWindow.isMinimized()) mainWindow.restore();
+        mainWindow.show();
+        mainWindow.focus();
     });
 
     // 只有获取到锁的实例才执行初始化
@@ -85,10 +101,16 @@ if (!gotTheLock) {
         startBackend();
         setupIPC();
 
+        // 先问一次安全状态，决定启动时要不要显示主窗口。
+        // 兜底：4 秒内后端还没答复就照常显示，免得界面永远出不来。
+        refreshSecurityState();
+        setTimeout(decideInitialVisibility, 4000);
+
         // 定时轮询状态
         setInterval(async () => {
             if (mainWindow && !mainWindow.isDestroyed()) {
                 try {
+                    refreshSecurityState();
                     const status = await fetchAPI('/api/status');
                     if (status) {
                         // 检测状态变化并发送通知
@@ -126,12 +148,18 @@ if (!gotTheLock) {
                                     }
                                 }
 
-                                new Notification({
-                                    title: '警告：正在被远程控制',
-                                    body: `软件: ${tools}\n时间: ${startTimeStr}`,
-                                    icon: path.join(__dirname, 'assets', 'icon.png'),
-                                    urgent: true
-                                }).show();
+                                // 静默模式下不弹本地通知，避免远程操作者看见"你被发现了"。
+                                // 飞书/钉钉/邮件由守护进程独立发送，不受这里影响。
+                                if (!isSilent()) {
+                                    new Notification({
+                                        title: '警告：正在被远程控制',
+                                        body: `软件: ${tools}\n时间: ${startTimeStr}`,
+                                        icon: path.join(__dirname, 'assets', 'icon.png'),
+                                        urgent: true
+                                    }).show();
+                                } else {
+                                    console.log('[静默] 密码保护静默已开启，跳过本地通知');
+                                }
                             } else {
                                 // 远程控制结束
                                 let durationStr = '未知';
@@ -151,11 +179,13 @@ if (!gotTheLock) {
 
                                 currentSessionStartTime = null; // 重置
 
-                                new Notification({
-                                    title: '安全：远程控制已结束',
-                                    body: `远程会话已结束。\n持续时长: ${durationStr}`,
-                                    icon: path.join(__dirname, 'assets', 'icon.png')
-                                }).show();
+                                if (!isSilent()) {
+                                    new Notification({
+                                        title: '安全：远程控制已结束',
+                                        body: `远程会话已结束。\n持续时长: ${durationStr}`,
+                                        icon: path.join(__dirname, 'assets', 'icon.png')
+                                    }).show();
+                                }
                             }
                             lastRemoteStatus = status.remote_active;
                         }
@@ -177,17 +207,21 @@ if (!gotTheLock) {
     });
 
     app.on('will-quit', (event) => {
-        // 如果已经处理过退出，直接退出
-        if (isQuitting) {
+        // 退出流程只跑一次。
+        // 注意这里必须用独立的 exitHandled，不能用 isQuitting：
+        // 托盘"退出"要先把 isQuitting 置真，窗口才关得掉（见 mainWindow 的 close 处理），
+        // 否则这里会被误判成"已处理"而直接跳过退出通知。
+        if (exitHandled) {
             console.log('[退出] 已经处理过退出，直接退出');
             return;
         }
-        
+        exitHandled = true;
+
         console.log('[退出] 开始处理退出流程');
         // 阻止默认退出行为，等待通知发送完成
         event.preventDefault();
         isQuitting = true;
-        
+
         console.log('[退出] 发送退出通知请求到后端...');
         const startTime = Date.now();
         
@@ -208,11 +242,8 @@ if (!gotTheLock) {
         ]).then((result) => {
             // 通知发送完成（成功或超时），现在可以安全地退出
             console.log('[退出] 准备杀死后端进程并退出应用');
-            if (backendProcess) {
-                backendProcess.kill();
-                backendProcess = null;
-                console.log('[退出] 后端进程已终止');
-            }
+            stopBackend();
+            console.log('[退出] 后端进程已终止');
             // 真正退出应用
             console.log('[退出] 调用 app.exit(0)');
             app.exit(0);
@@ -220,11 +251,8 @@ if (!gotTheLock) {
             // 即使失败也要退出
             const elapsed = Date.now() - startTime;
             console.error(`[退出] 发送退出通知失败 (耗时: ${elapsed}ms):`, error);
-            if (backendProcess) {
-                backendProcess.kill();
-                backendProcess = null;
-                console.log('[退出] 后端进程已终止（错误情况下）');
-            }
+            stopBackend();
+            console.log('[退出] 后端进程已终止（错误情况下）');
             console.log('[退出] 调用 app.exit(0)（错误情况下）');
             app.exit(0);
         });
@@ -241,8 +269,44 @@ if (!gotTheLock) {
 
 // --- 功能函数定义 ---
 
-function startBackend() {
-    if (backendProcess) return;
+// isBackendAlive 探一下 18080 上是不是已经有守护进程在跑
+function isBackendAlive() {
+    return fetchAPI('/health').then(() => true).catch(() => false);
+}
+
+// stopBackend 关闭守护进程。
+// 守护进程是分离启动的（detached），当前这个可能是上一次界面留下来、本次只是接管的，
+// 句柄不在手里，所以按进程名兜底收一次，确保"退出"就是真的退出。
+function stopBackend() {
+    if (backendProcess) {
+        try { backendProcess.kill(); } catch (e) { }
+        backendProcess = null;
+    }
+    try {
+        spawnSync('taskkill', ['/IM', 'RemoteKnown-daemon.exe', '/F'], { windowsHide: true });
+    } catch (e) {
+        console.error('[后端] 结束守护进程失败:', e.message);
+    }
+}
+
+async function startBackend() {
+    // backendStarting 是必需的：探活是异步的，没有它两次并发调用会各起一个守护进程
+    if (backendProcess || backendStarting) return;
+    backendStarting = true;
+    try {
+        // 守护进程分离之后，界面被杀/重启时它可能还活着。
+        // 这时候不能再起一个去抢 18080，否则新进程秒退，陷入 2 秒一次的重启循环。
+        if (await isBackendAlive()) {
+            console.log('[后端] 已有守护进程在运行，直接接管');
+            return;
+        }
+        spawnBackend();
+    } finally {
+        backendStarting = false;
+    }
+}
+
+function spawnBackend() {
 
     let backendPath;
     if (app.isPackaged) {
@@ -259,11 +323,15 @@ function startBackend() {
     }
 
     try {
+        backendStartedAt = Date.now();
         backendProcess = spawn(backendPath, [], {
-            detached: false, // 不分离，这样父进程退出子进程也会收到信号（虽然我们手动处理了 will-quit）
+            detached: true, // 必须分离：否则界面被强杀时守护进程会被 job object 一起带走，就没人报警了
             stdio: 'ignore',
             windowsHide: true
         });
+
+        // 让守护进程不再挂在界面的事件循环上，界面被杀它也能继续跑
+        backendProcess.unref();
 
         backendProcess.on('error', (err) => {
             console.error('Backend process error:', err);
@@ -271,8 +339,14 @@ function startBackend() {
 
         backendProcess.on('close', (code) => {
             console.log(`Backend process exited with code ${code}`);
+            const lived = Date.now() - backendStartedAt;
             backendProcess = null;
             if (!isQuitting) {
+                // 活过 10 秒才算"曾经正常跑着又被弄死了"。
+                // 端口被占导致的秒退会一直循环重启，不能把它当成入侵告警。
+                if (lived > 10000 && !backendDeathReported) {
+                    backendDiedUnexpectedly = true;
+                }
                 // 如果非正常退出且应用仍在运行，尝试重启
                 setTimeout(startBackend, 2000);
             }
@@ -316,7 +390,7 @@ function fetchAPI(endpoint) {
     });
 }
 
-function fetchAPIPost(endpoint, data) {
+function fetchAPIPost(endpoint, data, extraHeaders) {
     return new Promise((resolve, reject) => {
         const postData = JSON.stringify(data);
         const options = {
@@ -324,10 +398,10 @@ function fetchAPIPost(endpoint, data) {
             port: 18080,
             path: endpoint,
             method: 'POST',
-            headers: {
+            headers: Object.assign({
                 'Content-Type': 'application/json',
                 'Content-Length': Buffer.byteLength(postData)
-            }
+            }, extraHeaders || {})
         };
 
         const req = http.request(options, (res) => {
@@ -368,6 +442,123 @@ function fetchAPIPost(endpoint, data) {
     });
 }
 
+// ===================== 密码保护闸门 =====================
+
+// refreshSecurityState 跟着 2 秒轮询一起刷新，失败时保持上一次的值。
+async function refreshSecurityState() {
+    try {
+        const st = await fetchAPI('/api/security/state');
+        if (st) {
+            securityState = st;
+            securityStateLoaded = true;
+            decideInitialVisibility();
+            reportBackendDeath(); // 后端已经答话了，可以补告警
+        }
+    } catch (e) {
+        // 后端还没起来，按上一次的状态处理
+    }
+    return securityState;
+}
+
+// reportBackendDeath 守护进程被杀又被拉起来之后，由新的守护进程把这件事发出去。
+// 必须等它重新起来才发得出去，所以放在状态轮询成功之后。
+function reportBackendDeath() {
+    if (!backendDiedUnexpectedly || backendDeathReported) return;
+    backendDiedUnexpectedly = false;
+    backendDeathReported = true;
+    console.log('[心跳] 守护进程曾意外退出，已重启，正在补发告警');
+    fetchAPIPost('/api/notify', { type: 'daemon_restarted' }).catch((e) => {
+        console.error('[心跳] 补发告警失败:', e.message);
+    });
+}
+
+// isSilent 是否静默本地 Windows 通知（只有启用密码保护后才生效）
+function isSilent() {
+    return !!(securityState.enabled && securityState.silent_local);
+}
+
+// isGated 托盘入口是否需要密码
+function isGated() {
+    return !!(securityState.enabled && securityState.lock_tray);
+}
+
+// decideInitialVisibility 启用密码保护且静默时，启动就缩在托盘里不露面。
+// 主窗口以 show:false 创建，这里决定要不要放出来。
+function decideInitialVisibility() {
+    if (initialShowDone || !mainWindow || mainWindow.isDestroyed()) return;
+    initialShowDone = true;
+    if (isSilent()) {
+        console.log('[静默] 已启用密码保护静默，启动后仅驻留托盘');
+        return;
+    }
+    mainWindow.show();
+}
+
+// requireUnlock 弹出独立解锁小窗，等用户验证。
+// 用独立窗口而不是主窗口里的弹层，是因为"显示主窗口"本身就要先验证。
+async function requireUnlock(action) {
+    // 启动最初几秒还没拿到安全状态，先补一次，别让人趁这个空档溜过去
+    if (!securityStateLoaded) await refreshSecurityState();
+    if (!isGated()) return true;
+
+    // 已经开着一个解锁窗就聚焦它，不重复弹
+    if (unlockWindow && !unlockWindow.isDestroyed()) {
+        unlockWindow.focus();
+        return false;
+    }
+
+    return new Promise((resolve) => {
+        unlockPending = { resolve };
+
+        unlockWindow = new BrowserWindow({
+            width: 340,
+            height: 240,
+            frame: false,
+            resizable: false,
+            minimizable: false,
+            maximizable: false,
+            fullscreenable: false,
+            alwaysOnTop: true,
+            skipTaskbar: true,
+            show: false,
+            backgroundColor: '#fbfbfc',
+            webPreferences: {
+                nodeIntegration: false,
+                contextIsolation: true,
+                preload: path.join(__dirname, 'preload.js')
+            }
+        });
+
+        unlockWindow.loadFile('unlock.html', { query: { action } });
+        unlockWindow.once('ready-to-show', () => {
+            unlockWindow.show();
+            unlockWindow.focus();
+        });
+
+        // 直接关掉窗口 = 取消，程序继续跑
+        unlockWindow.on('closed', () => {
+            unlockWindow = null;
+            if (unlockPending) {
+                const p = unlockPending;
+                unlockPending = null;
+                p.resolve(false);
+            }
+        });
+    });
+}
+
+// finishUnlock 由解锁小窗的 IPC 调用，ok 为 true 表示验证通过
+function finishUnlock(ok, token) {
+    if (token) lastUnlockToken = token;
+    const p = unlockPending;
+    unlockPending = null;
+    if (unlockWindow && !unlockWindow.isDestroyed()) {
+        unlockWindow.destroy();
+        unlockWindow = null;
+    }
+    if (p) p.resolve(!!ok);
+}
+
 function createWindow() {
     mainWindow = new BrowserWindow({
         width: 900,
@@ -376,6 +567,8 @@ function createWindow() {
         frame: false,
         transparent: false,
         alwaysOnTop: true,
+        // 先不显示：等拿到安全状态再决定要不要露面（静默模式下只驻留托盘）
+        show: false,
         webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,
@@ -425,9 +618,15 @@ function createTray() {
     tray.setToolTip('远程知道了 - 未检测到远程控制');
 
     const contextMenu = Menu.buildFromTemplate([
-        { label: '显示主窗口', click: () => mainWindow && mainWindow.show() },
+        {
+            label: '显示主窗口', click: async () => {
+                if (!await requireUnlock('show')) return;
+                if (mainWindow) mainWindow.show();
+            }
+        },
         {
             label: '查看状态', click: async () => {
+                if (!await requireUnlock('status')) return;
                 try {
                     const status = await fetchAPI('/api/status');
                     if (status && mainWindow) {
@@ -435,7 +634,7 @@ function createTray() {
                         const msg = status.remote_active
                             ? `远程控制进行中\n开始时间: ${status.start_time}`
                             : '未检测到远程控制';
-                        dialog.showMessageBox(mainWindow, {
+                        dialog.showMessageBox({
                             type: 'info',
                             title: '远程状态',
                             message: msg
@@ -445,7 +644,7 @@ function createTray() {
                     console.error('获取状态失败:', error);
                     if (mainWindow) {
                         const { dialog } = require('electron');
-                        dialog.showMessageBox(mainWindow, {
+                        dialog.showMessageBox({
                             type: 'error',
                             title: '错误',
                             message: '无法获取远程状态: ' + error.message
@@ -456,7 +655,21 @@ function createTray() {
         },
         { type: 'separator' },
         {
-            label: '退出', click: () => {
+            label: '退出', click: async () => {
+                if (!await requireUnlock('quit')) return;
+                // 明说退出的后果：本机不再被监控，并且会往手机推一条提醒
+                if (isGated()) {
+                    const { response } = await dialog.showMessageBox({
+                        type: 'warning',
+                        buttons: ['取消', '确认退出'],
+                        defaultId: 0,
+                        cancelId: 0,
+                        title: '远程知道了',
+                        message: '确认退出？',
+                        detail: '退出后本机将不再被监控，并会向你配置的通知渠道发送一条退出提醒。'
+                    });
+                    if (response !== 1) return;
+                }
                 isQuitting = true;
                 app.quit();
             }
@@ -464,14 +677,15 @@ function createTray() {
     ]);
 
     tray.setContextMenu(contextMenu);
-    tray.on('click', () => {
-        if (mainWindow) {
-            if (mainWindow.isVisible()) {
-                mainWindow.hide();
-            } else {
-                mainWindow.show();
-            }
+    tray.on('click', async () => {
+        if (!mainWindow) return;
+        if (mainWindow.isVisible()) {
+            mainWindow.hide();
+            return;
         }
+        // 单击展开主窗口和菜单里的"显示主窗口"是同一件事，闸门也一样
+        if (!await requireUnlock('show')) return;
+        mainWindow.show();
     });
 }
 
@@ -655,6 +869,84 @@ function setupIPC() {
 
     ipcMain.handle('toolsResetBuiltin', async () => {
         return await fetchAPIPost('/api/tools/rules/reset', {});
+    });
+
+    // ---- 密码保护 ----
+    ipcMain.handle('securityGetState', async () => {
+        const st = await fetchAPI('/api/security/state');
+        if (st) securityState = st;
+        return st;
+    });
+
+    ipcMain.handle('securitySetup', async (event, password) => {
+        const r = await fetchAPIPost('/api/security/setup', { password });
+        await refreshSecurityState();
+        return r;
+    });
+
+    ipcMain.handle('securityVerify', async (event, password, action) => {
+        const r = await fetchAPIPost('/api/security/verify', { password, action });
+        if (r && r.token) lastUnlockToken = r.token;
+        return r;
+    });
+
+    ipcMain.handle('securityChange', async (event, oldPassword, newPassword) => {
+        return await fetchAPIPost('/api/security/change', {
+            old_password: oldPassword,
+            new_password: newPassword
+        });
+    });
+
+    ipcMain.handle('securityDisable', async (event, password) => {
+        const r = await fetchAPIPost('/api/security/disable', { password });
+        await refreshSecurityState();
+        return r;
+    });
+
+    // 改安全设置需要带解锁令牌；令牌过期就复用同一个解锁小窗再验一次。
+    ipcMain.handle('securitySetOptions', async (event, opts) => {
+        const post = () => fetchAPIPost('/api/security/options', opts,
+            lastUnlockToken ? { 'X-Unlock-Token': lastUnlockToken } : {});
+        try {
+            const r = await post();
+            await refreshSecurityState();
+            return r;
+        } catch (e) {
+            if (!/验证密码/.test(e.message || '')) throw e;
+            if (!await requireUnlock('options')) throw new Error('已取消');
+            const r = await post();
+            await refreshSecurityState();
+            return r;
+        }
+    });
+
+    ipcMain.handle('securityRegenerateRecovery', async (event, password) => {
+        return await fetchAPIPost('/api/security/recovery/regenerate', { password });
+    });
+
+    ipcMain.handle('securityResetRequest', async () => {
+        return await fetchAPIPost('/api/security/reset/request', {});
+    });
+
+    ipcMain.handle('securityResetConfirm', async (event, payload) => {
+        return await fetchAPIPost('/api/security/reset/confirm', payload || {});
+    });
+
+    // ---- 解锁小窗专用 ----
+    ipcMain.handle('unlockDone', (event, token) => {
+        finishUnlock(true, token);
+    });
+
+    ipcMain.handle('unlockCancel', () => {
+        finishUnlock(false, null);
+    });
+
+    ipcMain.handle('unlockResize', (event, height) => {
+        if (!unlockWindow || unlockWindow.isDestroyed()) return;
+        const h = Math.max(160, Math.min(520, Math.round(height) + 34)); // 34 = 标题栏
+        const [w] = unlockWindow.getSize();
+        unlockWindow.setSize(w, h);
+        unlockWindow.center();
     });
 
     ipcMain.handle('getAppVersion', () => {

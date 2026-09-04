@@ -1023,6 +1023,7 @@
                     <button class="tab-btn active" onclick="switchTab('notification')"><span class="tab-icon">🔔</span>通知</button>
                     <button class="tab-btn" onclick="switchTab('general')"><span class="tab-icon">⚙️</span>通用</button>
                     <button class="tab-btn" onclick="switchTab('tools')"><span class="tab-icon">🖥️</span>监控对象</button>
+                    <button class="tab-btn" onclick="switchTab('security')"><span class="tab-icon">🔒</span>安全</button>
                     <button class="tab-btn" onclick="switchTab('feedback')"><span class="tab-icon">💬</span>反馈</button>
                     <button class="tab-btn" onclick="switchTab('about')"><span class="tab-icon">ℹ️</span>关于</button>
                 </div>
@@ -1321,6 +1322,76 @@
                                 <label for="startupEnabled">开机自动启动</label>
                             </div>
                             <div class="help-text">系统启动时自动运行远程知道了，实时保护您的设备安全</div>
+                        </div>
+                    </div>
+
+                    <!-- 安全 Tab -->
+                    <div id="tab-security" class="tab-pane">
+                        <div class="form-group">
+                            <div class="checkbox-group">
+                                <input type="checkbox" id="securityEnabled" name="security_enabled">
+                                <label for="securityEnabled">启用密码保护</label>
+                            </div>
+                            <div class="help-text">防止他人远程进入后直接关闭本程序。开启后，托盘的显示主窗口 / 查看状态 / 退出都需要密码。</div>
+                        </div>
+
+                        <div id="securityOptions" style="display:none;">
+                            <div class="form-group">
+                                <div class="checkbox-group">
+                                    <input type="checkbox" id="securityLockTray" name="security_lock_tray">
+                                    <label for="securityLockTray">托盘菜单需要密码</label>
+                                </div>
+                                <div class="help-text">显示主窗口 / 查看状态 / 退出</div>
+                            </div>
+                            <div class="form-group">
+                                <div class="checkbox-group">
+                                    <input type="checkbox" id="securitySilent" name="security_silent">
+                                    <label for="securitySilent">远程期间静默本地通知</label>
+                                </div>
+                                <div class="help-text">不弹 Windows 通知，避免远程操作者察觉；飞书 / 钉钉 / 邮件照常推送，托盘图标仍会变红。开启后程序启动只驻留托盘。</div>
+                            </div>
+                            <div class="form-group">
+                                <div style="display:flex; gap:14px; flex-wrap:wrap;">
+                                    <a href="javascript:void(0)" class="action-link" onclick="securityForm('change')">修改密码</a>
+                                    <a href="javascript:void(0)" class="action-link" onclick="securityForm('regen')">重新生成恢复码</a>
+                                    <a href="javascript:void(0)" class="action-link" onclick="securityForm('disable')">关闭密码保护</a>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 内联表单：设置 / 修改 / 关闭 / 重新生成恢复码 -->
+                        <div id="securityForm" style="display:none; margin-top:4px; padding:12px 14px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px;">
+                            <div id="securityFormTitle" style="font-size:13px; font-weight:600; margin-bottom:4px;"></div>
+                            <div id="securityFormDesc" class="help-text" style="margin:0 0 10px;"></div>
+                            <input type="password" id="securityPw1" placeholder="密码" autocomplete="off"
+                                style="width:100%; margin-bottom:8px;">
+                            <input type="password" id="securityPw2" placeholder="确认密码" autocomplete="off"
+                                style="width:100%; margin-bottom:8px;">
+                            <div style="display:flex; gap:8px; align-items:center;">
+                                <button type="button" class="btn btn-primary" id="securityFormOk"
+                                    onclick="securityFormSubmit()">确定</button>
+                                <a href="javascript:void(0)" class="action-link" onclick="securityFormCancel()">取消</a>
+                            </div>
+                        </div>
+
+                        <!-- 恢复码只显示一次 -->
+                        <div id="securityRecovery" style="display:none; margin-top:10px; padding:12px 14px; background:#fdf6e7; border:1px solid #ebd9af; border-radius:8px;">
+                            <div style="font-size:13px; font-weight:600; color:#9a6a12; margin-bottom:4px;">🔑 请保存恢复码</div>
+                            <div class="help-text" style="margin:0 0 8px;">忘记密码时用它重置。<b>只显示这一次</b>，请截图或抄写保存。</div>
+                            <div id="securityRecoveryCode"
+                                style="font-family:Consolas,'Courier New',monospace; font-size:17px; letter-spacing:.08em; color:#9a6a12; user-select:text; margin-bottom:8px;">
+                            </div>
+                            <a href="javascript:void(0)" class="action-link" onclick="securityHideRecovery()">我已保存</a>
+                        </div>
+
+                        <div id="securityMsg" style="display:none; margin-top:10px; font-size:12px;"></div>
+
+                        <div style="margin-top:14px; padding:10px 12px; background:#f1f5f9; border-radius:8px;">
+                            <div style="font-size:12px; font-weight:600; margin-bottom:4px;">🛡️ 强行结束进程也拦不掉通知</div>
+                            <div class="help-text" style="margin:0;">
+                                密码只挡得住"顺手点退出"。对方若用任务管理器直接结束进程，守护进程会在 30 秒内发现界面失联并推送告警；
+                                反过来守护进程被结束，界面会自动把它拉起来并补一条通知。管理员权限下无法阻止杀进程，但你一定会知道。
+                            </div>
                         </div>
                     </div>
 
@@ -1644,6 +1715,8 @@
                 loadNotificationConfig();
             } else if (tabName === 'tools') {
                 loadToolsTab();
+            } else if (tabName === 'security') {
+                loadSecurityTab();
             }
         }
 
@@ -1683,6 +1756,10 @@
 
             if (tabName === 'tools') {
                 loadToolsTab();
+            }
+
+            if (tabName === 'security') {
+                loadSecurityTab();
             }
         }
 
@@ -2066,6 +2143,168 @@
             if (!window.remoteAudit) return;
             await window.remoteAudit.setStartupEnabled(this.checked);
         });
+
+        // ===== 安全：密码保护 =====
+        // secState 缓存后端返回的安全状态，勾选框的"回滚"要用它
+        let secState = { enabled: false, has_password: false, silent_local: true, lock_tray: true };
+        let secFormMode = null; // 'setup' | 'change' | 'disable' | 'regen'
+
+        function securityMsg(text, ok) {
+            const msg = document.getElementById('securityMsg');
+            msg.textContent = text || '';
+            msg.style.color = ok ? '#16a34a' : '#dc2626';
+            msg.style.display = text ? 'block' : 'none';
+            if (text && ok) setTimeout(() => { msg.style.display = 'none'; }, 2500);
+        }
+
+        async function loadSecurityTab() {
+            if (!window.remoteAudit || !window.remoteAudit.securityGetState) return;
+            securityFormCancel();
+            securityMsg('');
+            try {
+                secState = await window.remoteAudit.securityGetState() || secState;
+            } catch (e) {
+                securityMsg('无法读取安全状态：' + e.message);
+                return;
+            }
+            renderSecurityTab();
+        }
+
+        function renderSecurityTab() {
+            document.getElementById('securityEnabled').checked = !!secState.enabled;
+            document.getElementById('securityLockTray').checked = secState.lock_tray !== false;
+            document.getElementById('securitySilent').checked = secState.silent_local !== false;
+            document.getElementById('securityOptions').style.display = secState.enabled ? 'block' : 'none';
+        }
+
+        // 打开开关 = 走首次设置；关掉开关 = 需要验证当前密码。
+        // 勾选状态先按用户点的样子留着（待确认），填完密码才真正生效；
+        // 取消或失败时由 renderSecurityTab() 按后端状态弹回去。
+        document.getElementById('securityEnabled').addEventListener('change', function () {
+            securityForm(this.checked ? 'setup' : 'disable');
+        });
+
+        document.getElementById('securityLockTray').addEventListener('change', function () {
+            securitySaveOption({ lock_tray: this.checked }, this, 'lock_tray');
+        });
+
+        document.getElementById('securitySilent').addEventListener('change', function () {
+            securitySaveOption({ silent_local: this.checked }, this, 'silent_local');
+        });
+
+        async function securitySaveOption(opts, checkbox, key) {
+            try {
+                await window.remoteAudit.securitySetOptions(opts);
+                secState[key] = checkbox.checked;
+                securityMsg('已保存', true);
+            } catch (e) {
+                checkbox.checked = secState[key] !== false; // 保存失败就回滚
+                securityMsg('保存失败：' + e.message);
+            }
+        }
+
+        const SEC_FORMS = {
+            setup: {
+                title: '设置保护密码',
+                desc: '至少 4 位。填完并点「启用」后才真正生效，托盘退出等操作都需要它。',
+                two: true, ok: '启用'
+            },
+            change: {
+                title: '修改密码',
+                desc: '先输入当前密码，再输入新密码。',
+                two: true, ok: '修改', firstPlaceholder: '当前密码', secondPlaceholder: '新密码'
+            },
+            disable: {
+                title: '关闭密码保护',
+                desc: '需要验证当前密码，验证通过后才会真正关闭。关闭后任何人都可以直接退出本程序。',
+                two: false, ok: '关闭保护'
+            },
+            regen: {
+                title: '重新生成恢复码',
+                desc: '需要验证当前密码。旧的恢复码会立即作废。',
+                two: false, ok: '生成'
+            }
+        };
+
+        function securityForm(mode) {
+            secFormMode = mode;
+            const cfg = SEC_FORMS[mode];
+            const pw1 = document.getElementById('securityPw1');
+            const pw2 = document.getElementById('securityPw2');
+            document.getElementById('securityFormTitle').textContent = cfg.title;
+            document.getElementById('securityFormDesc').textContent = cfg.desc;
+            document.getElementById('securityFormOk').textContent = cfg.ok;
+            pw1.value = '';
+            pw2.value = '';
+            pw1.placeholder = cfg.firstPlaceholder || '密码';
+            pw2.placeholder = cfg.secondPlaceholder || '确认密码';
+            pw2.style.display = cfg.two ? 'block' : 'none';
+            document.getElementById('securityForm').style.display = 'block';
+            document.getElementById('securityRecovery').style.display = 'none';
+            securityMsg('');
+            pw1.focus();
+        }
+
+        function securityFormCancel() {
+            secFormMode = null;
+            document.getElementById('securityForm').style.display = 'none';
+            document.getElementById('securityPw1').value = '';
+            document.getElementById('securityPw2').value = '';
+            renderSecurityTab();
+        }
+
+        async function securityFormSubmit() {
+            if (!secFormMode || !window.remoteAudit) return;
+            const mode = secFormMode;
+            const pw1 = document.getElementById('securityPw1').value;
+            const pw2 = document.getElementById('securityPw2').value;
+            const btn = document.getElementById('securityFormOk');
+
+            if (!pw1) { securityMsg('请输入密码'); return; }
+            if (mode === 'setup') {
+                if (pw1.length < 4) { securityMsg('密码至少 4 位'); return; }
+                if (pw1 !== pw2) { securityMsg('两次输入的密码不一致'); return; }
+            }
+            if (mode === 'change' && pw2.length < 4) { securityMsg('新密码至少 4 位'); return; }
+
+            btn.disabled = true;
+            try {
+                if (mode === 'setup') {
+                    const r = await window.remoteAudit.securitySetup(pw1);
+                    securityShowRecovery(r && r.recovery_code);
+                    securityMsg('密码保护已启用', true);
+                } else if (mode === 'change') {
+                    await window.remoteAudit.securityChange(pw1, pw2);
+                    securityMsg('密码已修改', true);
+                } else if (mode === 'disable') {
+                    await window.remoteAudit.securityDisable(pw1);
+                    securityMsg('密码保护已关闭', true);
+                } else if (mode === 'regen') {
+                    const r = await window.remoteAudit.securityRegenerateRecovery(pw1);
+                    securityShowRecovery(r && r.recovery_code);
+                    securityMsg('恢复码已重新生成', true);
+                }
+                secFormMode = null;
+                document.getElementById('securityForm').style.display = 'none';
+                secState = await window.remoteAudit.securityGetState() || secState;
+                renderSecurityTab();
+            } catch (e) {
+                securityMsg(e.message || '操作失败');
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        function securityShowRecovery(code) {
+            if (!code) return;
+            document.getElementById('securityRecoveryCode').textContent = code;
+            document.getElementById('securityRecovery').style.display = 'block';
+        }
+
+        function securityHideRecovery() {
+            document.getElementById('securityRecovery').style.display = 'none';
+            document.getElementById('securityRecoveryCode').textContent = '';
+        }
 
         // ===== 检测规则更新 =====
 

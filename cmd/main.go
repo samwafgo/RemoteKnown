@@ -3,6 +3,7 @@ package main
 import (
 	"RemoteKnown/internal/detector"
 	"RemoteKnown/internal/notifier"
+	"RemoteKnown/internal/security"
 	"RemoteKnown/internal/server"
 	"RemoteKnown/internal/storage"
 	"io"
@@ -59,8 +60,9 @@ func main() {
 
 	notifier := notifier.NewNotifier(storage)
 	detector := detector.NewDetector(storage, notifier)
+	security := security.NewManager(storage, notifier)
 
-	srv := server.NewServer(detector, storage, notifier)
+	srv := server.NewServer(detector, storage, notifier, security)
 
 	go func() {
 		if err := srv.Start(); err != nil {

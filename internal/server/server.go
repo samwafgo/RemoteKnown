@@ -13,6 +13,7 @@ import (
 	"RemoteKnown/internal/detector"
 	"RemoteKnown/internal/notifier"
 	"RemoteKnown/internal/ruleupdate"
+	"RemoteKnown/internal/security"
 	"RemoteKnown/internal/storage"
 	"RemoteKnown/internal/version"
 )
@@ -28,6 +29,7 @@ type Server struct {
 	detector *detector.Detector
 	storage  *storage.Storage
 	notifier *notifier.Notifier
+	security *security.Manager
 	port     int
 	running  bool
 	clients  map[string]chan []byte
@@ -36,6 +38,13 @@ type Server struct {
 	// 录制新工具时的基线进程快照（POST /api/tools/snapshot 写入，/api/tools/diff 读取）
 	snapBaseline map[int32]detector.ProcSnap
 	snapMu       sync.Mutex
+
+	// 界面心跳：Electron 每 2 秒轮询 /api/status，据此判断界面是否被强行结束
+	lastSeen  time.Time
+	uiAlerted bool
+	seenMu    sync.Mutex
+	stopCh    chan struct{}
+	stopOnce  sync.Once
 }
 
 type StatusResponse struct {
@@ -46,13 +55,15 @@ type StatusResponse struct {
 	OverallConf  float64           `json:"overall_confidence"`
 }
 
-func NewServer(detector *detector.Detector, storage *storage.Storage, notifier *notifier.Notifier) *Server {
+func NewServer(detector *detector.Detector, storage *storage.Storage, notifier *notifier.Notifier, security *security.Manager) *Server {
 	return &Server{
 		detector: detector,
 		storage:  storage,
 		notifier: notifier,
+		security: security,
 		port:     DefaultPort,
 		clients:  make(map[string]chan []byte),
+		stopCh:   make(chan struct{}),
 	}
 }
 
@@ -77,9 +88,21 @@ func (s *Server) Start() error {
 	http.HandleFunc("/api/tools/custom/remove", s.handleToolsCustomRemove)
 	http.HandleFunc("/api/tools/rules", s.handleToolsRulesRaw)
 	http.HandleFunc("/api/tools/rules/reset", s.handleToolsRulesReset)
+	http.HandleFunc("/api/security/state", s.handleSecurityState)
+	http.HandleFunc("/api/security/setup", s.handleSecuritySetup)
+	http.HandleFunc("/api/security/verify", s.handleSecurityVerify)
+	http.HandleFunc("/api/security/change", s.handleSecurityChange)
+	http.HandleFunc("/api/security/disable", s.handleSecurityDisable)
+	http.HandleFunc("/api/security/options", s.handleSecurityOptions)
+	http.HandleFunc("/api/security/recovery/regenerate", s.handleSecurityRecoveryRegenerate)
+	http.HandleFunc("/api/security/reset/request", s.handleSecurityResetRequest)
+	http.HandleFunc("/api/security/reset/confirm", s.handleSecurityResetConfirm)
 	http.HandleFunc("/health", s.handleHealth)
 
 	s.running = true
+
+	// 界面被任务管理器强行结束时，由守护进程这一侧发现并告警
+	go s.watchUIHeartbeat()
 
 	addr := s.getListenAddr()
 	log.Printf("启动 HTTP API 服务器: %s", addr)
@@ -93,9 +116,13 @@ func (s *Server) getListenAddr() string {
 
 func (s *Server) Stop() {
 	s.running = false
+	s.stopOnce.Do(func() { close(s.stopCh) })
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
+	// 界面每 2 秒来问一次状态，这就是心跳
+	s.touchHeartbeat()
+
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -466,6 +493,15 @@ func (s *Server) handleNotify(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[通知API] 处理程序退出通知")
 		s.notifier.NotifyAppExit()
 		log.Printf("[通知API] 程序退出通知已发送")
+	case "daemon_restarted":
+		// 界面发现守护进程意外死亡并把它拉了起来。
+		// 只有启用密码保护时才告警，否则属于噪音。
+		log.Printf("[通知API] 守护进程曾被终止，已由界面重启")
+		if s.security != nil && s.security.Enabled() {
+			s.security.Alert("守护进程曾被终止",
+				"事件：守护进程意外退出，已由界面自动重启",
+				"提示：若不是你本人操作，请立即检查这台机器")
+		}
 	default:
 		log.Printf("[通知API] 未知的通知类型: %s", req.Type)
 		http.Error(w, "Unknown notification type", http.StatusBadRequest)

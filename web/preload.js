@@ -34,5 +34,19 @@ contextBridge.exposeInMainWorld('remoteAudit', {
     toolsRemoveCustom: (processName, toolName) => ipcRenderer.invoke('toolsRemoveCustom', processName, toolName),
     toolsGetRulesRaw: () => ipcRenderer.invoke('toolsGetRulesRaw'),
     toolsSetRulesRaw: (jsonText) => ipcRenderer.invoke('toolsSetRulesRaw', jsonText),
-    toolsResetBuiltin: () => ipcRenderer.invoke('toolsResetBuiltin')
+    toolsResetBuiltin: () => ipcRenderer.invoke('toolsResetBuiltin'),
+    // 密码保护
+    securityGetState: () => ipcRenderer.invoke('securityGetState'),
+    securitySetup: (password) => ipcRenderer.invoke('securitySetup', password),
+    securityVerify: (password, action) => ipcRenderer.invoke('securityVerify', password, action),
+    securityChange: (oldPassword, newPassword) => ipcRenderer.invoke('securityChange', oldPassword, newPassword),
+    securityDisable: (password) => ipcRenderer.invoke('securityDisable', password),
+    securitySetOptions: (opts) => ipcRenderer.invoke('securitySetOptions', opts),
+    securityRegenerateRecovery: (password) => ipcRenderer.invoke('securityRegenerateRecovery', password),
+    securityResetRequest: () => ipcRenderer.invoke('securityResetRequest'),
+    securityResetConfirm: (payload) => ipcRenderer.invoke('securityResetConfirm', payload),
+    // 解锁小窗
+    unlockDone: (token) => ipcRenderer.invoke('unlockDone', token),
+    unlockCancel: () => ipcRenderer.invoke('unlockCancel'),
+    unlockResize: (height) => ipcRenderer.invoke('unlockResize', height)
 });

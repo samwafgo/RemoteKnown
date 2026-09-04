@@ -184,6 +184,24 @@
             flex-wrap: wrap;
         }
 
+        .uc-item .uc-notes {
+            margin: 6px 0 0;
+            padding-left: 16px;
+            font-size: 12px;
+            line-height: 1.65;
+            color: #4b5563;
+            max-height: 168px;
+            overflow-y: auto;
+        }
+
+        .uc-item .uc-notes li {
+            margin-bottom: 2px;
+        }
+
+        .uc-item .uc-notes b {
+            color: #111827;
+        }
+
         .uc-item .uc-ver {
             color: #6b7280;
             font-weight: 400;
@@ -1414,8 +1432,11 @@
                                     style="display:none; margin-top: 8px; background: #fef2f2; padding: 10px; border-radius: 4px; border: 1px solid #fee2e2;">
                                     <p style="color: #991b1b; font-weight: bold; margin: 0 0 4px 0;">发现新版本: <span
                                             id="newVersion"></span></p>
+                                    <div id="updateNotes"
+                                        style="display:none; text-align:left; margin: 6px 0 0; font-size: 12px; color: #7f1d1d; line-height: 1.65; max-height: 150px; overflow-y: auto;">
+                                    </div>
                                     <button class="btn btn-primary" onclick="openDownloadLink()"
-                                        style="font-size: 12px; padding: 4px 12px; margin-top: 4px;">前往下载</button>
+                                        style="font-size: 12px; padding: 4px 12px; margin-top: 8px;">前往下载</button>
                                 </div>
                             </div>
 
@@ -2312,7 +2333,7 @@
         const UC_AUTO_INTERVAL_MS = 60 * 60 * 1000;   // 每小时自动检查一次
         const UC_TAB_RECHECK_MS = 10 * 60 * 1000;     // 进入监控对象页时，距上次检查超过 10 分钟再查
         const uc = {
-            app:   { current: '', latest: '', url: '', available: false },
+            app:   { current: '', latest: '', url: '', notes: '', available: false },
             rules: { current: '', latest: '', updateAvailable: false, requiresAppUpgrade: false, requiredAppVersion: '', description: '' },
             busy: false,
             lastCheck: 0
@@ -2320,11 +2341,32 @@
 
         function ucStripV(v) { return String(v || '').replace(/^v/, ''); }
 
-        function ucSetApp(tag, url) {
+        function ucSetApp(tag, url, notes) {
             uc.app.latest = ucStripV(tag);
             uc.app.url = url || '';
+            uc.app.notes = notes || '';
             uc.app.available = true;
             renderUpdateCenter();
+        }
+
+        // ucNotesLines 把 GitHub Release 正文拆成条目。
+        // 正文来自 README 更新日志，只用到无序列表和 **加粗**，不值得为它引一个 markdown 库。
+        function ucNotesLines(md) {
+            return String(md || '')
+                .split(/\r?\n/)
+                .map(l => l.trim())
+                .filter(l => l && !/^#{1,6}\s/.test(l) && !/^[-*_]{3,}$/.test(l))
+                .map(l => l.replace(/^[*\-+]\s+/, ''));
+        }
+
+        // ucNotesHtml 先转义再还原加粗，避免 Release 正文里的内容被当成 HTML 执行
+        function ucNotesHtml(md) {
+            const lines = ucNotesLines(md);
+            if (!lines.length) return '';
+            const items = lines
+                .map(l => '<li>' + toolsEscape(l).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>') + '</li>')
+                .join('');
+            return '<ul class="uc-notes">' + items + '</ul>';
         }
 
         function ucClearApp() {
@@ -2401,10 +2443,13 @@
                         action = '<button class="uc-btn primary" onclick="ucOpenDownload()">' + i.btn + '</button>';
                     }
                 }
+                // 主程序有更新时，把 Release 里的"本次更新内容"直接摊开给用户看
+                const notes = (i.key === 'app' && i.up) ? ucNotesHtml(uc.app.notes) : '';
                 return '<div class="uc-item">'
                     + '<div class="uc-ic">' + i.ic + '</div>'
                     + '<div><div class="uc-t">' + i.title + ' ' + ver + ' ' + chip + '</div>'
-                    + '<div class="uc-d ' + (i.dep ? 'dep' : '') + '">' + toolsEscape(i.desc) + '</div></div>'
+                    + '<div class="uc-d ' + (i.dep ? 'dep' : '') + '">' + toolsEscape(i.desc) + '</div>'
+                    + notes + '</div>'
                     + '<div>' + action + '</div>'
                     + '</div>';
             }).join('');
@@ -2698,18 +2743,20 @@
                         
                         if (comparison > 0) {
                             // 有新版本，进顶部更新中心
-                            ucSetApp(result.tag_name, result.html_url);
+                            ucSetApp(result.tag_name, result.html_url, result.body);
                             
                             // 保存版本信息供后续使用
                             window.latestVersionInfo = {
                                 version: result.tag_name,
-                                url: result.html_url
+                                url: result.html_url,
+                                notes: result.body
                             };
                             
                             // 同时更新设置页面的信息
                             document.getElementById('newVersion').innerText = result.tag_name;
                             document.getElementById('updateBadge').style.display = 'inline-block';
                             latestDownloadUrl = result.html_url;
+                            renderUpdateNotes(result.body);
                         }
                     }
                 }
@@ -2719,13 +2766,24 @@
             }
         }
 
+        // renderUpdateNotes 把本次更新内容渲染到「关于」页的新版本提示里
+        function renderUpdateNotes(md) {
+            const box = document.getElementById('updateNotes');
+            if (!box) return;
+            const html = ucNotesHtml(md);
+            box.innerHTML = html ? html.replace('class="uc-notes"', 'style="margin:0; padding-left:16px;"') : '';
+            box.style.display = html ? 'block' : 'none';
+        }
+
         // 显示更新详情（点击header通知时）
         function showUpdateDetails() {
-            if (window.latestVersionInfo) {
-                const message = `发现新版本: ${window.latestVersionInfo.version}\n\n是否前往下载页面？`;
-                if (confirm(message)) {
-                    openExternal(window.latestVersionInfo.url);
-                }
+            if (!window.latestVersionInfo) return;
+            const info = window.latestVersionInfo;
+            // 把本次更新内容一并摆出来，别让用户只看到一个版本号就决定要不要升级
+            const lines = ucNotesLines(info.notes).map(l => '· ' + l.replace(/\*\*/g, ''));
+            const detail = lines.length ? '\n\n本次更新：\n' + lines.join('\n') : '';
+            if (confirm(`发现新版本: ${info.version}${detail}\n\n是否前往下载页面？`)) {
+                openExternal(info.url);
             }
         }
 
@@ -2782,13 +2840,15 @@
                             info.style.display = 'block';
                             badge.style.display = 'inline-block';
                             latestDownloadUrl = result.html_url;
+                            renderUpdateNotes(result.body);
                             link.innerText = '发现新版本';
                             
                             // 同步到顶部更新中心
-                            ucSetApp(result.tag_name, result.html_url);
+                            ucSetApp(result.tag_name, result.html_url, result.body);
                             window.latestVersionInfo = {
                                 version: result.tag_name,
-                                url: result.html_url
+                                url: result.html_url,
+                                notes: result.body
                             };
                         } else {
                             link.innerText = '当前已是最新版本';

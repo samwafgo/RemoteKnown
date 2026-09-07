@@ -45,6 +45,15 @@ contextBridge.exposeInMainWorld('remoteAudit', {
     securityRegenerateRecovery: (password) => ipcRenderer.invoke('securityRegenerateRecovery', password),
     securityResetRequest: () => ipcRenderer.invoke('securityResetRequest'),
     securityResetConfirm: (payload) => ipcRenderer.invoke('securityResetConfirm', payload),
+    // 隐私屏
+    privacyGetStatus: () => ipcRenderer.invoke('privacyGetStatus'),
+    privacyGetConfig: () => ipcRenderer.invoke('privacyGetConfig'),
+    privacySaveConfig: (config) => ipcRenderer.invoke('privacySaveConfig', config),
+    privacyEnable: () => ipcRenderer.invoke('privacyEnable'),
+    privacyDisable: (password) => ipcRenderer.invoke('privacyDisable', password),
+    onPrivacyUpdate: (callback) => {
+        ipcRenderer.on('privacyUpdate', (event, data) => callback(data));
+    },
     // 解锁小窗
     unlockDone: (token) => ipcRenderer.invoke('unlockDone', token),
     unlockCancel: () => ipcRenderer.invoke('unlockCancel'),

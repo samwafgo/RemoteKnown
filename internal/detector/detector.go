@@ -40,6 +40,11 @@ type Detector struct {
 	stateMutex  sync.RWMutex
 	signalMutex sync.RWMutex
 	windowsMu   sync.Mutex
+
+	// 远程状态变化时的额外回调，供隐私屏等旁路功能挂钩。
+	// 由 cmd/main.go 装配，可为 nil。
+	OnRemoteStart func()
+	OnRemoteEnd   func()
 }
 
 // Notifier 接口，避免循环依赖
@@ -270,6 +275,10 @@ func (d *Detector) handleRemoteStart(signals []Signal) {
 		}
 		d.notifier.NotifyRemoteStart(notifierSignals)
 	}
+
+	if d.OnRemoteStart != nil {
+		go d.OnRemoteStart()
+	}
 }
 
 // repeatInterval 读取通知配置中的重复提醒间隔，未配置通知器或未启用时返回 0
@@ -318,6 +327,10 @@ func (d *Detector) handleRemoteEnd() {
 			notifierSignals[i] = notifierSignal{name: s.Name}
 		}
 		d.notifier.NotifyRemoteEnd(notifierSignals)
+	}
+
+	if d.OnRemoteEnd != nil {
+		go d.OnRemoteEnd()
 	}
 }
 

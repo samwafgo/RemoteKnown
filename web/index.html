@@ -1042,6 +1042,7 @@
                     <button class="tab-btn" onclick="switchTab('general')"><span class="tab-icon">⚙️</span>通用</button>
                     <button class="tab-btn" onclick="switchTab('tools')"><span class="tab-icon">🖥️</span>监控对象</button>
                     <button class="tab-btn" onclick="switchTab('security')"><span class="tab-icon">🔒</span>安全</button>
+                    <button class="tab-btn" onclick="switchTab('privacy')"><span class="tab-icon">🛡️</span>隐私屏</button>
                     <button class="tab-btn" onclick="switchTab('feedback')"><span class="tab-icon">💬</span>反馈</button>
                     <button class="tab-btn" onclick="switchTab('about')"><span class="tab-icon">ℹ️</span>关于</button>
                 </div>
@@ -1414,6 +1415,134 @@
                     </div>
 
                     <!-- 关于 Tab -->
+                    <!-- 隐私屏 Tab -->
+                    <div id="tab-privacy" class="tab-pane">
+                        <div id="privacyStatusBox"
+                            style="padding:10px 12px; border-radius:6px; background:#f8fafc; border:1px solid #e2e8f0; margin-bottom:16px; font-size:12px;">
+                            正在读取隐私屏状态…
+                        </div>
+
+                        <div class="form-group">
+                            <label for="privacyTrigger">触发方式</label>
+                            <select id="privacyTrigger">
+                                <option value="off">关闭</option>
+                                <option value="manual">手动开启</option>
+                                <option value="auto">检测到远程时自动</option>
+                            </select>
+                            <div class="help-text" id="privacyTriggerHelp">默认关闭，功能完全不介入。</div>
+                        </div>
+
+                        <div class="form-group">
+                            <label>遮罩背景</label>
+                            <div style="display:flex; gap:8px;">
+                                <select id="privacyPreset" style="flex:1;" onchange="privacyPresetPick()"></select>
+                                <input type="text" id="privacyBgColor" placeholder="#0A2A43" style="width:120px;">
+                            </div>
+                            <div class="help-text">选内置配色，或直接填 #RRGGBB</div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="privacyImage">背景图片（可选）</label>
+                            <input type="text" id="privacyImage" placeholder="留空则用纯色">
+                            <div class="help-text">支持 png / jpg / gif，盖在底色上。图片读不出来会自动退回纯色。</div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="privacyFit">图片铺法</label>
+                            <select id="privacyFit">
+                                <option value="cover">cover — 铺满，超出裁掉</option>
+                                <option value="contain">contain — 整张放下，四周留底色</option>
+                                <option value="stretch">stretch — 拉伸变形铺满</option>
+                                <option value="center">center — 原始尺寸居中</option>
+                                <option value="tile">tile — 平铺</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <div class="checkbox-group">
+                                <input type="checkbox" id="privacyShowText">
+                                <label for="privacyShowText">在遮罩上显示提示文字</label>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="privacyText">提示文案</label>
+                            <input type="text" id="privacyText">
+                            <div class="help-text">{hotkey} 替换成解锁热键，{s} 替换成剩余秒数</div>
+                        </div>
+
+                        <div class="form-group">
+                            <label>文字样式</label>
+                            <div style="display:flex; gap:8px; align-items:center;">
+                                <input type="text" id="privacyFont" placeholder="Microsoft YaHei" style="flex:1;">
+                                <input type="number" id="privacyFontSize" min="8" max="400" style="width:80px;" title="字号（像素）">
+                                <input type="text" id="privacyFgColor" placeholder="#FFFFFF" style="width:100px;">
+                            </div>
+                            <div class="checkbox-group" style="margin-top:8px;">
+                                <input type="checkbox" id="privacyBold">
+                                <label for="privacyBold">粗体</label>
+                            </div>
+                            <div class="help-text">依次为：字体、字号、文字颜色</div>
+                        </div>
+
+                        <div class="form-group">
+                            <div class="checkbox-group">
+                                <input type="checkbox" id="privacyHideCursor">
+                                <label for="privacyHideCursor">隐藏鼠标光标</label>
+                            </div>
+                            <div class="help-text">光标不受窗口合成管辖，不藏会浮在遮罩上，把远端操作者的动作轨迹暴露给旁人。</div>
+                        </div>
+
+                        <div class="form-group">
+                            <div class="checkbox-group">
+                                <input type="checkbox" id="privacyBlockInput">
+                                <label for="privacyBlockInput">屏蔽本地键鼠输入</label>
+                            </div>
+                            <div class="help-text">旁人无法打断远端操作。Ctrl+Alt+Del 是系统保留组合键，仍会解除屏蔽，这也是留给你的逃生通道。</div>
+                        </div>
+
+                        <div class="form-group">
+                            <div class="checkbox-group">
+                                <input type="checkbox" id="privacyRequirePw">
+                                <label for="privacyRequirePw">撤除遮罩需要输入密码</label>
+                            </div>
+                            <div class="help-text">沿用「安全」页那套密码与恢复码。到点自动撤除、远程结束撤除、程序退出恢复这三条不受密码约束。</div>
+                        </div>
+
+                        <div class="form-group">
+                            <label>解锁热键 / 最长持续（分钟）</label>
+                            <div style="display:flex; gap:8px;">
+                                <input type="text" id="privacyHotkey" placeholder="Ctrl+Alt+P" style="flex:1;">
+                                <input type="number" id="privacyMaxMinutes" min="0" max="1440" style="width:110px;">
+                            </div>
+                            <div class="help-text">最长持续填 0 表示不限制（不推荐，失去兜底）</div>
+                        </div>
+
+                        <div class="form-group">
+                            <div class="checkbox-group">
+                                <input type="checkbox" id="privacyDropOnEnd">
+                                <label for="privacyDropOnEnd">远程会话结束时自动撤除遮罩</label>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <div class="checkbox-group">
+                                <input type="checkbox" id="privacyLockOnEnd">
+                                <label for="privacyLockOnEnd">远程结束后锁定 Windows</label>
+                            </div>
+                            <div class="help-text">避免有人直接走到机器前接手一个已登录的桌面。默认关闭。</div>
+                        </div>
+
+                        <div class="form-group">
+                            <div style="display:flex; gap:12px; align-items:center;">
+                                <button type="button" class="btn btn-primary" onclick="savePrivacyConfig()">保存</button>
+                                <a href="javascript:void(0)" class="action-link" onclick="privacyEnableNow()">立即开启</a>
+                                <a href="javascript:void(0)" class="action-link" onclick="privacyDisableNow()">撤除遮罩</a>
+                            </div>
+                            <div id="privacyMsg" style="display:none; margin-top:8px; font-size:12px;"></div>
+                        </div>
+                    </div>
+
                     <div id="tab-about" class="tab-pane">
                         <div class="about-info">
                             <img src="assets/logo.png" alt="Logo">
@@ -1738,6 +1867,8 @@
                 loadToolsTab();
             } else if (tabName === 'security') {
                 loadSecurityTab();
+            } else if (tabName === 'privacy') {
+                loadPrivacyTab();
             }
         }
 
@@ -1782,7 +1913,222 @@
             if (tabName === 'security') {
                 loadSecurityTab();
             }
+
+            if (tabName === 'privacy') {
+                loadPrivacyTab();
+            }
         }
+
+
+        // ==================== 隐私屏 ====================
+
+        // 与 internal/privacyscreen 里的调色板保持一致
+        const PRIVACY_PALETTE = [
+            ['techblue', '#0A2A43', '科技蓝·深'],
+            ['blue', '#0B3D91', '科技蓝·亮'],
+            ['black', '#000000', '纯黑'],
+            ['navy', '#001F3F', '藏青'],
+            ['gray', '#1E1E1E', '深灰'],
+            ['teal', '#0A3A3A', '墨青'],
+            ['purple', '#221034', '暗紫'],
+            ['green', '#0E2A1C', '墨绿'],
+            ['wine', '#2B0F16', '酒红'],
+            ['white', '#FFFFFF', '纯白']
+        ];
+
+        function privacyEsc(v) {
+            return String(v).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+        }
+
+        function privacyPresetPick() {
+            const v = document.getElementById('privacyPreset').value;
+            if (v) document.getElementById('privacyBgColor').value = v;
+        }
+
+        function privacyMsg(text, ok) {
+            const el = document.getElementById('privacyMsg');
+            if (!el) return;
+            el.style.display = text ? 'block' : 'none';
+            el.style.color = ok ? '#0f9d63' : '#c53030';
+            el.textContent = text || '';
+        }
+
+        // 状态条：系统是否支持、遮罩是否生效、上次失败原因。
+        // 失败原因必须显式摆出来 —— 遮罩没成功就意味着隐私已经泄漏。
+        function renderPrivacyStatus(st) {
+            const box = document.getElementById('privacyStatusBox');
+            if (!box || !st) return;
+
+            if (!st.supported) {
+                box.style.background = '#fdecec';
+                box.style.borderColor = '#f5c6c6';
+                box.innerHTML = '<b style="color:#c53030;">当前系统不支持隐私屏</b><br>' +
+                    (st.reason || ('需要 build ' + st.min_build + ' 及以上，当前 ' + st.build));
+                return;
+            }
+
+            let html = '';
+            if (st.active) {
+                box.style.background = '#e9f7f0';
+                box.style.borderColor = '#bde5d1';
+                html = '<b style="color:#0f9d63;">遮罩生效中</b>';
+                if (st.started_at) {
+                    const t = new Date(st.started_at);
+                    if (!isNaN(t)) html += '　开始于 ' + t.toLocaleTimeString();
+                }
+            } else {
+                box.style.background = '#f8fafc';
+                box.style.borderColor = '#e2e8f0';
+                html = '遮罩未开启　<span style="color:#666;">系统支持（build ' + st.build + '）</span>';
+            }
+            if (st.desktop_locked) {
+                html += '<br><span style="color:#b45309;">当前处于锁屏或安全桌面，遮罩此刻不显示 —— ' +
+                    '这是 Windows 桌面模型的限制，离开该界面后会自动恢复。</span>';
+            }
+            if (st.uncovered && st.uncovered.length) {
+                html += '<br><span style="color:#b45309;">以下窗口盖不住，遮罩期间仍然可见：' +
+                    st.uncovered.map(privacyEsc).join('、') +
+                    '。这类窗口运行在更高的系统层级，普通权限的程序抢不到它上面。</span>';
+            }
+            if (st.last_error) {
+                html += '<br><span style="color:#c53030;">上次失败：' + privacyEsc(st.last_error) + '</span>';
+            }
+            box.innerHTML = html;
+        }
+
+        async function loadPrivacyTab() {
+            try {
+                const [cfg, st] = await Promise.all([
+                    window.remoteAudit.privacyGetConfig(),
+                    window.remoteAudit.privacyGetStatus()
+                ]);
+
+                const sel = document.getElementById('privacyPreset');
+                if (sel && !sel.options.length) {
+                    sel.innerHTML = '<option value="">自定义…</option>' +
+                        PRIVACY_PALETTE.map(c =>
+                            '<option value="' + c[1] + '">' + c[2] + '（' + c[1] + '）</option>').join('');
+                }
+
+                if (cfg) {
+                    document.getElementById('privacyTrigger').value = cfg.trigger || 'off';
+                    document.getElementById('privacyBgColor').value = cfg.bg_color || '';
+                    document.getElementById('privacyImage').value = cfg.image || '';
+                    document.getElementById('privacyFit').value = cfg.fit || 'cover';
+                    document.getElementById('privacyShowText').checked = !!cfg.show_text;
+                    document.getElementById('privacyText').value = cfg.text || '';
+                    document.getElementById('privacyFont').value = cfg.font || '';
+                    document.getElementById('privacyFontSize').value = cfg.font_size || 12;
+                    document.getElementById('privacyBold').checked = !!cfg.bold;
+                    document.getElementById('privacyFgColor').value = cfg.fg_color || '';
+                    document.getElementById('privacyHideCursor').checked = !!cfg.hide_cursor;
+                    document.getElementById('privacyBlockInput').checked = !!cfg.block_input;
+                    document.getElementById('privacyRequirePw').checked = !!cfg.require_password;
+                    document.getElementById('privacyHotkey').value = cfg.hotkey || '';
+                    document.getElementById('privacyMaxMinutes').value = cfg.max_minutes || 0;
+                    document.getElementById('privacyDropOnEnd').checked = !!cfg.drop_on_end;
+                    document.getElementById('privacyLockOnEnd').checked = !!cfg.lock_on_end;
+                    if (sel) sel.value = PRIVACY_PALETTE.some(c => c[1] === cfg.bg_color) ? cfg.bg_color : '';
+                    privacyTriggerHelp();
+                }
+                renderPrivacyStatus(st);
+                privacyMsg('');
+            } catch (e) {
+                privacyMsg('读取隐私屏配置失败：' + e.message);
+            }
+        }
+
+        function privacyTriggerHelp() {
+            const v = document.getElementById('privacyTrigger').value;
+            const el = document.getElementById('privacyTriggerHelp');
+            if (!el) return;
+            if (v === 'auto') {
+                el.innerHTML = '检测到远程会话时自动遮住本机。<b>注意语义是反的</b>：' +
+                    '若是非授权远程，遮罩反而替对方挡住了你的视线。';
+            } else if (v === 'manual') {
+                el.textContent = '只能手动开启，随时可关。';
+            } else {
+                el.textContent = '默认关闭，功能完全不介入。';
+            }
+        }
+
+        function collectPrivacyConfig() {
+            return {
+                trigger: document.getElementById('privacyTrigger').value,
+                bg_color: document.getElementById('privacyBgColor').value.trim(),
+                image: document.getElementById('privacyImage').value.trim(),
+                fit: document.getElementById('privacyFit').value,
+                show_text: document.getElementById('privacyShowText').checked,
+                text: document.getElementById('privacyText').value,
+                font: document.getElementById('privacyFont').value.trim(),
+                font_size: parseInt(document.getElementById('privacyFontSize').value, 10) || 12,
+                bold: document.getElementById('privacyBold').checked,
+                fg_color: document.getElementById('privacyFgColor').value.trim(),
+                hide_cursor: document.getElementById('privacyHideCursor').checked,
+                block_input: document.getElementById('privacyBlockInput').checked,
+                require_password: document.getElementById('privacyRequirePw').checked,
+                hotkey: document.getElementById('privacyHotkey').value.trim(),
+                max_minutes: parseInt(document.getElementById('privacyMaxMinutes').value, 10) || 0,
+                drop_on_end: document.getElementById('privacyDropOnEnd').checked,
+                lock_on_end: document.getElementById('privacyLockOnEnd').checked
+            };
+        }
+
+        async function savePrivacyConfig() {
+            try {
+                const r = await window.remoteAudit.privacySaveConfig(collectPrivacyConfig());
+                if (r && r.success === false) {
+                    privacyMsg(r.error || '保存失败');
+                    return;
+                }
+                privacyMsg('已保存', true);
+                loadPrivacyTab();
+            } catch (e) {
+                privacyMsg('保存失败：' + e.message);
+            }
+        }
+
+        async function privacyEnableNow() {
+            try {
+                const r = await window.remoteAudit.privacyEnable();
+                if (r && r.success === false) {
+                    privacyMsg(r.error || '开启失败');
+                } else {
+                    privacyMsg('遮罩已开启', true);
+                }
+                renderPrivacyStatus(await window.remoteAudit.privacyGetStatus());
+            } catch (e) {
+                privacyMsg('开启失败：' + e.message);
+            }
+        }
+
+        async function privacyDisableNow() {
+            try {
+                // 密码校验在主进程里走已有的解锁小窗，这里不重复收密码
+                const r = await window.remoteAudit.privacyDisable('');
+                if (r && r.success === false) {
+                    privacyMsg(r.error || '撤除失败，可能需要先验证密码');
+                } else {
+                    privacyMsg('遮罩已撤除', true);
+                }
+                renderPrivacyStatus(await window.remoteAudit.privacyGetStatus());
+            } catch (e) {
+                privacyMsg('撤除失败：' + e.message);
+            }
+        }
+
+        // 主进程每 2 秒推一次，设置页开着时状态条自动跟随
+        if (window.remoteAudit && window.remoteAudit.onPrivacyUpdate) {
+            window.remoteAudit.onPrivacyUpdate((st) => {
+                const pane = document.getElementById('tab-privacy');
+                if (pane && pane.classList.contains('active')) renderPrivacyStatus(st);
+            });
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const t = document.getElementById('privacyTrigger');
+            if (t) t.addEventListener('change', privacyTriggerHelp);
+        });
 
         // 监控对象页：规则版本 + 工具列表 + 高级编辑器一起加载（切 tab 与顶部标签直达共用）
         function loadToolsTab() {

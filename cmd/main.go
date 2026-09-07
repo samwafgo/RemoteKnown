@@ -3,6 +3,7 @@ package main
 import (
 	"RemoteKnown/internal/detector"
 	"RemoteKnown/internal/notifier"
+	"RemoteKnown/internal/privacyscreen"
 	"RemoteKnown/internal/security"
 	"RemoteKnown/internal/server"
 	"RemoteKnown/internal/storage"
@@ -62,7 +63,13 @@ func main() {
 	detector := detector.NewDetector(storage, notifier)
 	security := security.NewManager(storage, notifier)
 
+	// 隐私屏：默认触发方式为关闭，不装配也不会影响其余功能
+	privacy := privacyscreen.NewManager(storage, notifier)
+	detector.OnRemoteStart = privacy.OnRemoteStart
+	detector.OnRemoteEnd = privacy.OnRemoteEnd
+
 	srv := server.NewServer(detector, storage, notifier, security)
+	srv.SetPrivacy(privacy)
 
 	go func() {
 		if err := srv.Start(); err != nil {
@@ -77,6 +84,8 @@ func main() {
 	<-sigCh
 
 	log.Println("正在关闭 RemoteKnown 守护进程...")
+	// 先撤遮罩再停服务：绝不能把黑屏和隐藏的光标留给用户
+	privacy.Shutdown()
 	srv.Stop()
 	log.Println("RemoteKnown 已退出")
 }

@@ -12,6 +12,7 @@ import (
 
 	"RemoteKnown/internal/detector"
 	"RemoteKnown/internal/notifier"
+	"RemoteKnown/internal/privacyscreen"
 	"RemoteKnown/internal/ruleupdate"
 	"RemoteKnown/internal/security"
 	"RemoteKnown/internal/storage"
@@ -30,6 +31,7 @@ type Server struct {
 	storage  *storage.Storage
 	notifier *notifier.Notifier
 	security *security.Manager
+	privacy  *privacyscreen.Manager
 	port     int
 	running  bool
 	clients  map[string]chan []byte
@@ -88,6 +90,11 @@ func (s *Server) Start() error {
 	http.HandleFunc("/api/tools/custom/remove", s.handleToolsCustomRemove)
 	http.HandleFunc("/api/tools/rules", s.handleToolsRulesRaw)
 	http.HandleFunc("/api/tools/rules/reset", s.handleToolsRulesReset)
+	http.HandleFunc("/api/privacy/status", s.handlePrivacyStatus)
+	http.HandleFunc("/api/privacy/config", s.handlePrivacyConfig)
+	http.HandleFunc("/api/privacy/enable", s.handlePrivacyEnable)
+	http.HandleFunc("/api/privacy/disable", s.handlePrivacyDisable)
+	http.HandleFunc("/api/privacy/unlock-ack", s.handlePrivacyUnlockAck)
 	http.HandleFunc("/api/security/state", s.handleSecurityState)
 	http.HandleFunc("/api/security/setup", s.handleSecuritySetup)
 	http.HandleFunc("/api/security/verify", s.handleSecurityVerify)

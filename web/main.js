@@ -193,6 +193,17 @@ if (!gotTheLock) {
                         mainWindow.webContents.send('statusUpdate', status);
                         updateTray(status);
                     }
+
+                    // 隐私屏：同一轮里顺带拿一次状态。
+                    // unlock_pending 表示用户在遮罩下按了热键，等着弹密码框。
+                    const pv = await fetchAPI('/api/privacy/status');
+                    if (pv) {
+                        mainWindow.webContents.send('privacyUpdate', pv);
+                        if (pv.unlock_pending) {
+                            const cfg = await fetchAPI('/api/privacy/config');
+                            handlePrivacyUnlockRequest(cfg);
+                        }
+                    }
                 } catch (e) {
                     // ignore errors during poll
                 }
@@ -529,6 +540,14 @@ async function requireUnlock(action) {
             }
         });
 
+        // 密码框绝不能出现在远端画面里；隐私屏场景下还得压过全屏遮罩
+        try {
+            unlockWindow.setContentProtection(true);
+            unlockWindow.setAlwaysOnTop(true, 'screen-saver');
+        } catch (e) {
+            console.error('解锁窗置顶/防抓屏设置失败:', e);
+        }
+
         unlockWindow.loadFile('unlock.html', { query: { action } });
         unlockWindow.once('ready-to-show', () => {
             unlockWindow.show();
@@ -545,6 +564,43 @@ async function requireUnlock(action) {
             }
         });
     });
+}
+
+// privacyDisable 撤除遮罩。
+// 后端认令牌也认密码；这里优先带上最近一次验证拿到的令牌，
+// 省得同一个密码被重复校验、把失败次数算重。
+async function privacyDisable(password) {
+    return await fetchAPIPost('/api/privacy/disable', { password: password || '' },
+        lastUnlockToken ? { 'X-Unlock-Token': lastUnlockToken } : {});
+}
+
+// handlePrivacyUnlockRequest 用户在遮罩下按了热键。
+// 遮罩是全屏置顶的，所以解锁小窗必须：
+//   1. alwaysOnTop 用 screen-saver 层级，压过遮罩
+//   2. setContentProtection(true)，别让远端看到密码框
+// 守护进程那边在 unlock_pending 期间也会暂停抢置顶，两头配合才稳。
+let privacyUnlocking = false;
+async function handlePrivacyUnlockRequest(cfg) {
+    if (privacyUnlocking) return;
+    privacyUnlocking = true;
+    try {
+        const needPw = cfg && cfg.require_password && isGated();
+        if (!needPw) {
+            await privacyDisable('');
+            return;
+        }
+        const ok = await requireUnlock('privacy');
+        if (ok) {
+            await privacyDisable('');
+        } else {
+            // 用户取消了，清掉标记，别让它每轮都重复弹
+            await fetchAPIPost('/api/privacy/unlock-ack', {}).catch(() => {});
+        }
+    } catch (e) {
+        console.error('隐私屏解锁失败:', e);
+    } finally {
+        privacyUnlocking = false;
+    }
 }
 
 // finishUnlock 由解锁小窗的 IPC 调用，ok 为 true 表示验证通过
@@ -872,6 +928,41 @@ function setupIPC() {
     });
 
     // ---- 密码保护 ----
+    // ---------- 隐私屏 ----------
+
+    ipcMain.handle('privacyGetStatus', async () => {
+        return await fetchAPI('/api/privacy/status');
+    });
+
+    ipcMain.handle('privacyGetConfig', async () => {
+        return await fetchAPI('/api/privacy/config');
+    });
+
+    // 这三个接口在被拒时会返回 4xx，fetchAPIPost 会因此 reject。
+    // 统一转成 { success:false, error } 交给渲染进程：
+    // "触发方式为关闭""请先验证密码"这类都是正常的业务拒绝，
+    // 不该在主进程日志里刷成未捕获异常。
+    const privacyCall = async (fn) => {
+        try {
+            return await fn();
+        } catch (e) {
+            return { success: false, error: e.message || String(e) };
+        }
+    };
+
+    ipcMain.handle('privacySaveConfig', async (event, config) => {
+        return await privacyCall(() => fetchAPIPost('/api/privacy/config', config,
+            lastUnlockToken ? { 'X-Unlock-Token': lastUnlockToken } : {}));
+    });
+
+    ipcMain.handle('privacyEnable', async () => {
+        return await privacyCall(() => fetchAPIPost('/api/privacy/enable', {}));
+    });
+
+    ipcMain.handle('privacyDisable', async (event, password) => {
+        return await privacyCall(() => privacyDisable(password));
+    });
+
     ipcMain.handle('securityGetState', async () => {
         const st = await fetchAPI('/api/security/state');
         if (st) securityState = st;

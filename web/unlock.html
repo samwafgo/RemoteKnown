@@ -210,6 +210,44 @@
             color: #9a6a12;
             user-select: text;
         }
+
+        /* 软键盘：纯 DOM 实现，只改 input.value，不做任何按键注入 */
+        .kb {
+            display: none;
+            margin-top: 10px;
+        }
+
+        .kb.on {
+            display: block;
+        }
+
+        .kb .row {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 4px;
+        }
+
+        .kb .row:last-child {
+            margin-bottom: 0;
+        }
+
+        .kb button {
+            flex: 1 1 0;
+            min-width: 0;
+            padding: 7px 0;
+            font-size: 12px;
+        }
+
+        .kb button.on {
+            background: #dbe6f8;
+            border-color: #2563c9;
+        }
+
+        .hint {
+            margin: 6px 0 0;
+            color: #8a939e;
+            font-size: 10.5px;
+        }
     </style>
 </head>
 
@@ -259,6 +297,125 @@
             if (f) { f.classList.add('bad'); f.value = ''; f.focus(); }
         }
 
+        // ---------- 焦点补救 ----------
+        // 遮罩场景下窗口的系统激活可能晚于页面渲染，渲染时 focus() 打了也白打，
+        // 所以：拿到系统焦点时补一次，加载后再连补几次覆盖激活时序。
+        function focusF1() {
+            const f = document.getElementById('f1');
+            if (f && !f.disabled) f.focus();
+        }
+        window.addEventListener('focus', focusF1);
+        [200, 600, 1500].forEach(ms => setTimeout(focusF1, ms));
+
+        // 快捷键：按任意可输入键先把焦点拉回密码框，字符会直接落进输入框
+        document.addEventListener('keydown', e => {
+            if (e.ctrlKey || e.metaKey || e.altKey) return;
+            if (e.key.length !== 1 && e.key !== 'Backspace') return;
+            const f = document.getElementById('f1');
+            if (f && !f.disabled && document.activeElement !== f) f.focus();
+        });
+        // Ctrl+K 开关软键盘
+        document.addEventListener('keydown', e => {
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+                e.preventDefault();
+                const t = document.getElementById('kbToggle');
+                if (t) t.click();
+            }
+        });
+
+        // ---------- 软键盘 ----------
+        // 点键只改 input.value，不走 SendInput / keybd_event 这类按键注入：
+        // 不会被安全软件判成注入，也不会触发系统的低层键盘钩子。
+        let kbShift = false, kbSym = false;
+
+        function setupSoftKeyboard(boxId, toggleId, getTarget) {
+            const box = document.getElementById(boxId);
+            const toggle = document.getElementById(toggleId);
+            if (!box || !toggle) return;
+            kbShift = false; kbSym = false;
+
+            toggle.addEventListener('click', () => {
+                box.classList.toggle('on');
+                const on = box.classList.contains('on');
+                toggle.textContent = on ? '⌨ 收起键盘' : '⌨ 软键盘';
+                if (on) renderRows();
+                const t = getTarget();
+                if (t) t.focus();
+                fit();
+            });
+
+            function rows() {
+                if (kbSym) return ['!@#$%^&*()', '-_=+[]{}', ';:\'",./<>?', '\\|~`'];
+                const base = ['1234567890', 'qwertyuiop', 'asdfghjkl', 'zxcvbnm'];
+                return kbShift ? base.map(r => r.toUpperCase()) : base;
+            }
+
+            function key(label, fn, wide) {
+                const b = document.createElement('button');
+                b.type = 'button';
+                b.textContent = label;
+                if (wide) b.style.flexGrow = '1.8';
+                // mousedown 阻止默认行为，点键时焦点留在密码框上
+                b.addEventListener('mousedown', e => e.preventDefault());
+                b.addEventListener('click', fn);
+                return b;
+            }
+
+            function insert(ch) {
+                const el = getTarget();
+                if (!el || el.disabled) return;
+                const s = el.selectionStart ?? el.value.length;
+                const e = el.selectionEnd ?? el.value.length;
+                el.value = el.value.slice(0, s) + ch + el.value.slice(e);
+                el.selectionStart = el.selectionEnd = s + ch.length;
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                if (kbShift) { kbShift = false; renderRows(); } // Shift 打一枪就回位
+            }
+
+            function backspace() {
+                const el = getTarget();
+                if (!el || el.disabled) return;
+                const s = el.selectionStart ?? el.value.length;
+                const e = el.selectionEnd ?? el.value.length;
+                if (s !== e) {
+                    el.value = el.value.slice(0, s) + el.value.slice(e);
+                    el.selectionStart = el.selectionEnd = s;
+                } else if (s > 0) {
+                    el.value = el.value.slice(0, s - 1) + el.value.slice(s);
+                    el.selectionStart = el.selectionEnd = s - 1;
+                }
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+
+            function renderRows() {
+                box.innerHTML = '';
+                rows().forEach(r => {
+                    const row = document.createElement('div');
+                    row.className = 'row';
+                    for (const ch of r) row.appendChild(key(ch, () => insert(ch)));
+                    box.appendChild(row);
+                });
+                const ctl = document.createElement('div');
+                ctl.className = 'row';
+                const shift = key('⇧', () => { kbShift = !kbShift; if (kbShift) kbSym = false; renderRows(); });
+                if (kbShift) shift.classList.add('on');
+                const sym = key('#+=', () => { kbSym = !kbSym; if (kbSym) kbShift = false; renderRows(); });
+                if (kbSym) sym.classList.add('on');
+                ctl.appendChild(shift);
+                ctl.appendChild(sym);
+                ctl.appendChild(key('空格', () => insert(' '), true));
+                ctl.appendChild(key('⌫', backspace));
+                ctl.appendChild(key('清空', () => {
+                    const el = getTarget();
+                    if (!el) return;
+                    el.value = '';
+                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                    el.focus();
+                }));
+                box.appendChild(ctl);
+            }
+        }
+
         // ---------- 步骤：输入密码 ----------
         function renderVerify(lockedMsg) {
             barIcon.textContent = '🔒';
@@ -267,9 +424,12 @@
                 <h1>请输入保护密码</h1>
                 <p class="sub">操作：${esc(ACTION_LABEL)}</p>
                 <input id="f1" type="password" placeholder="密码" autocomplete="off">
+                <div class="kb" id="kbBox"></div>
                 <p class="msg" id="msg">${esc(lockedMsg || '')}</p>
+                <p class="hint">按任意键即可输入 · Enter 确定 · Esc 取消 · Ctrl+K 软键盘</p>
                 <div class="foot">
                     <button class="link" id="forgot">忘记密码？</button>
+                    <button class="link" id="kbToggle" type="button">⌨ 软键盘</button>
                     <span class="push"></span>
                     <button id="cancel">取消</button>
                     <button class="primary" id="ok">确定</button>
@@ -278,6 +438,7 @@
             f1.focus();
             f1.addEventListener('keydown', e => { if (e.key === 'Enter') doVerify(); });
             f1.addEventListener('input', () => f1.classList.remove('bad'));
+            setupSoftKeyboard('kbBox', 'kbToggle', () => document.getElementById('f1'));
             document.getElementById('ok').onclick = doVerify;
             document.getElementById('cancel').onclick = () => api.unlockCancel();
             document.getElementById('forgot').onclick = () => renderResetPick();
@@ -391,15 +552,22 @@
                 <p class="sub">至少 4 位。旧的解锁状态会全部作废。</p>
                 <input id="f1" type="password" placeholder="新密码" autocomplete="off">
                 <input id="f2" type="password" placeholder="确认新密码" autocomplete="off">
+                <div class="kb" id="kbBox"></div>
                 <p class="msg" id="msg"></p>
                 <div class="foot">
                     <button class="link" id="back">上一步</button>
+                    <button class="link" id="kbToggle" type="button">⌨ 软键盘</button>
                     <span class="push"></span>
                     <button id="cancel">取消</button>
                     <button class="primary" id="ok">完成</button>
                 </div>`;
             const f1 = document.getElementById('f1'), f2 = document.getElementById('f2');
             f1.focus();
+            // 软键盘往最近聚焦的那个框里写
+            let kbTarget = f1;
+            f1.addEventListener('focus', () => kbTarget = f1);
+            f2.addEventListener('focus', () => kbTarget = f2);
+            setupSoftKeyboard('kbBox', 'kbToggle', () => kbTarget);
             f2.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
             document.getElementById('back').onclick = () => renderResetPick();
             document.getElementById('cancel').onclick = () => api.unlockCancel();

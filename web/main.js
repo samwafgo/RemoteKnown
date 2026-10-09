@@ -505,6 +505,25 @@ function decideInitialVisibility() {
     mainWindow.show();
 }
 
+// activateUnlockWindow 把解锁窗抢到前台。
+// 隐私屏场景下前台刚被遮罩进程占着，Windows 前台锁可能拒掉第一次 focus，
+// 切换 alwaysOnTop 再 focus 是最可靠的激活手段，所以连补几枪覆盖激活时序。
+function activateUnlockWindow() {
+    const kick = () => {
+        if (!unlockWindow || unlockWindow.isDestroyed()) return;
+        try {
+            unlockWindow.setAlwaysOnTop(false);
+            unlockWindow.setAlwaysOnTop(true, 'screen-saver');
+            unlockWindow.moveTop();
+            unlockWindow.focus();
+            if (unlockWindow.webContents) unlockWindow.webContents.focus();
+        } catch (e) { /* 窗口关闭竞态，忽略 */ }
+    };
+    kick();
+    setTimeout(kick, 150);
+    setTimeout(kick, 500);
+}
+
 // requireUnlock 弹出独立解锁小窗，等用户验证。
 // 用独立窗口而不是主窗口里的弹层，是因为"显示主窗口"本身就要先验证。
 async function requireUnlock(action) {
@@ -514,7 +533,7 @@ async function requireUnlock(action) {
 
     // 已经开着一个解锁窗就聚焦它，不重复弹
     if (unlockWindow && !unlockWindow.isDestroyed()) {
-        unlockWindow.focus();
+        activateUnlockWindow();
         return false;
     }
 
@@ -551,7 +570,7 @@ async function requireUnlock(action) {
         unlockWindow.loadFile('unlock.html', { query: { action } });
         unlockWindow.once('ready-to-show', () => {
             unlockWindow.show();
-            unlockWindow.focus();
+            activateUnlockWindow();
         });
 
         // 直接关掉窗口 = 取消，程序继续跑

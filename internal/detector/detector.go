@@ -414,7 +414,12 @@ func (d *Detector) GetHistory(limit int) ([]storage.RemoteSession, error) {
 
 // GetHistoryPaginated 分页获取历史记录
 func (d *Detector) GetHistoryPaginated(page, pageSize int) ([]storage.RemoteSession, int64, error) {
-	return d.storage.GetSessionsPaginated(page, pageSize)
+	return d.GetHistoryPaginatedFiltered(page, pageSize, storage.SessionFilter{})
+}
+
+// GetHistoryPaginatedFiltered 分页获取符合筛选条件的历史记录。
+func (d *Detector) GetHistoryPaginatedFiltered(page, pageSize int, filter storage.SessionFilter) ([]storage.RemoteSession, int64, error) {
+	return d.storage.GetSessionsPaginatedFiltered(page, pageSize, filter)
 }
 
 func formatDuration(d time.Duration) string {

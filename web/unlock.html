@@ -277,8 +277,10 @@
         let busy = false;
 
         function fit() {
-            // 内容高度变化时让主进程调整窗口，避免固定高度挤压或留白
-            api.unlockResize(document.body.scrollHeight);
+            // 内容高度变化时让主进程调整窗口，避免固定高度挤压或留白。
+            // 注意要量 .body 而不是 document.body：body 的 scrollHeight 不会小于视口，
+            // 窗口被软键盘撑高后就永远缩不回来了。
+            api.unlockResize(document.querySelector('.body').scrollHeight);
         }
 
         function esc(s) {

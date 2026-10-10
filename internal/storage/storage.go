@@ -3,6 +3,7 @@ package storage
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/go-gormigrate/gormigrate/v2"
@@ -171,29 +172,78 @@ func (s *Storage) GetRecentSessions(limit int) ([]RemoteSession, error) {
 	return sessions, err
 }
 
-// GetSessionsPaginated 分页获取会话记录
-// page: 页码（从1开始）
-// pageSize: 每页数量
-// 返回: 会话列表和总记录数
+// SessionFilter 筛选会话开始时间、已结束会话的秒数时长及信号文字。
+// 边界均包含在内；nil 表示不限制，时长指针可表达零秒限制。
+type SessionFilter struct {
+	StartFrom   *time.Time
+	StartTo     *time.Time
+	MinDuration *int64
+	MaxDuration *int64
+	Keyword     string
+}
+
+// Validate 同时供 HTTP API 和直接调用数据层的调用者校验范围。
+func (f SessionFilter) Validate() error {
+	if f.StartFrom != nil && f.StartTo != nil && f.StartFrom.After(*f.StartTo) {
+		return fmt.Errorf("开始时间下限不能晚于上限")
+	}
+	if f.MinDuration != nil && *f.MinDuration < 0 {
+		return fmt.Errorf("最短时长不能为负数")
+	}
+	if f.MaxDuration != nil && *f.MaxDuration < 0 {
+		return fmt.Errorf("最长时长不能为负数")
+	}
+	if f.MinDuration != nil && f.MaxDuration != nil && *f.MinDuration > *f.MaxDuration {
+		return fmt.Errorf("最短时长不能大于最长时长")
+	}
+	return nil
+}
+
+// GetSessionsPaginated 分页获取会话记录，保留无筛选条件的原有接口。
 func (s *Storage) GetSessionsPaginated(page, pageSize int) ([]RemoteSession, int64, error) {
-	var sessions []RemoteSession
-	var total int64
+	return s.GetSessionsPaginatedFiltered(page, pageSize, SessionFilter{})
+}
 
-	// 计算偏移量
-	offset := (page - 1) * pageSize
-
-	// 获取总数
-	err := s.db.Model(&RemoteSession{}).Count(&total).Error
-	if err != nil {
+// GetSessionsPaginatedFiltered 返回符合筛选条件的一页会话和筛选后的总数。
+func (s *Storage) GetSessionsPaginatedFiltered(page, pageSize int, filter SessionFilter) ([]RemoteSession, int64, error) {
+	if err := filter.Validate(); err != nil {
 		return nil, 0, err
 	}
+	var sessions []RemoteSession
+	var total int64
+	query := s.db.Model(&RemoteSession{})
 
-	// 获取分页数据
-	err = s.db.Order("start_time DESC").
-		Offset(offset).
+	// SQLite 用 julianday 解析驱动保存的 Go 时间字符串（含时区偏移），
+	// 避免按字符串排序/比较时将同一时刻的 UTC 和 +08:00 误判。
+	if filter.StartFrom != nil {
+		query = query.Where("julianday(start_time) >= julianday(?)", filter.StartFrom.UTC().Format(time.RFC3339Nano))
+	}
+	if filter.StartTo != nil {
+		query = query.Where("julianday(start_time) <= julianday(?)", filter.StartTo.UTC().Format(time.RFC3339Nano))
+	}
+	if filter.MinDuration != nil || filter.MaxDuration != nil {
+		// 未结束会话的 duration 尚未确定，不能当作零秒参与时长筛选。
+		query = query.Where("end_time IS NOT NULL")
+	}
+	if filter.MinDuration != nil {
+		query = query.Where("duration >= ?", *filter.MinDuration)
+	}
+	if filter.MaxDuration != nil {
+		query = query.Where("duration <= ?", *filter.MaxDuration)
+	}
+	if filter.Keyword != "" {
+		keyword := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(filter.Keyword)
+		query = query.Where(`signals LIKE ? ESCAPE '\'`, "%"+keyword+"%")
+	}
+
+	// Count 和分页复用完全相同的条件，分页与排序不影响总数。
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	err := query.Order("julianday(start_time) DESC").Order("id DESC").
+		Offset((page - 1) * pageSize).
 		Limit(pageSize).
 		Find(&sessions).Error
-
 	return sessions, total, err
 }
 

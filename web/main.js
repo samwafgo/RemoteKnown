@@ -4,9 +4,9 @@ const path = require('path');
 const http = require('http');
 const fs = require('fs');
 
-// 设置 AppUserModelId，修复 Windows 通知标题和图标问题
-// 必须与 package.json build.appId 一致
-app.setAppUserModelId('com.remoteknown.app');
+// 正式版与 package.json build.appId 一致；开发版独立分组，避免复用已安装版的旧图标缓存。
+const APP_USER_MODEL_ID = app.isPackaged ? 'com.remoteknown.app' : 'com.remoteknown.app.dev';
+app.setAppUserModelId(APP_USER_MODEL_ID);
 
 const API_BASE = 'http://127.0.0.1:18080';
 
@@ -61,6 +61,7 @@ let currentSessionStartTime = null; // 记录当前会话开始时间
 // --- 密码保护 ---
 // securityState 由 2 秒轮询刷新，托盘闸门与静默通知都读它。
 let securityState = { enabled: false, has_password: false, silent_local: true, lock_tray: true };
+const UNLOCK_WINDOW_WIDTH = 340;
 let unlockWindow = null;
 let unlockPending = null;   // { resolve } —— 等待解锁小窗给出结果
 let lastUnlockToken = null; // 最近一次验证通过的令牌，供"修改安全设置"复用
@@ -154,7 +155,7 @@ if (!gotTheLock) {
                                     new Notification({
                                         title: '警告：正在被远程控制',
                                         body: `软件: ${tools}\n时间: ${startTimeStr}`,
-                                        icon: path.join(__dirname, 'assets', 'icon.png'),
+                                        icon: path.join(__dirname, 'icon.png'),
                                         urgent: true
                                     }).show();
                                 } else {
@@ -183,7 +184,7 @@ if (!gotTheLock) {
                                     new Notification({
                                         title: '安全：远程控制已结束',
                                         body: `远程会话已结束。\n持续时长: ${durationStr}`,
-                                        icon: path.join(__dirname, 'assets', 'icon.png')
+                                        icon: path.join(__dirname, 'icon.png')
                                     }).show();
                                 }
                             }
@@ -541,7 +542,7 @@ async function requireUnlock(action) {
         unlockPending = { resolve };
 
         unlockWindow = new BrowserWindow({
-            width: 340,
+            width: UNLOCK_WINDOW_WIDTH,
             height: 240,
             frame: false,
             resizable: false,
@@ -638,6 +639,7 @@ function createWindow() {
     mainWindow = new BrowserWindow({
         width: 900,
         height: 700,
+        icon: path.join(__dirname, 'icon.png'),
         resizable: false,
         frame: false,
         transparent: false,
@@ -650,6 +652,17 @@ function createWindow() {
             preload: path.join(__dirname, 'preload.js')
         }
     });
+
+    if (process.platform === 'win32') {
+        // 任务栏分组可能从应用标识读取旧图标，窗口 icon 并不覆盖重启图标资源。
+        mainWindow.setAppDetails({
+            appId: APP_USER_MODEL_ID,
+            appIconPath: app.isPackaged ? process.execPath : path.join(__dirname, 'icon.ico'),
+            appIconIndex: 0,
+            relaunchCommand: app.isPackaged ? `"${process.execPath}"` : `"${process.execPath}" "${app.getAppPath()}"`,
+            relaunchDisplayName: '远程知道了'
+        });
+    }
 
     mainWindow.loadFile('index.html');
 
@@ -817,8 +830,14 @@ function setupIPC() {
         return await fetchAPI('/api/history');
     });
 
-    ipcMain.handle('getHistoryPaginated', async (event, page, pageSize) => {
-        return await fetchAPI(`/api/history?page=${page}&pageSize=${pageSize}`);
+    ipcMain.handle('getHistoryPaginated', async (event, page, pageSize, filters = {}) => {
+        const params = new URLSearchParams({ page, pageSize });
+        for (const key of ['start_from', 'start_to', 'min_duration', 'max_duration', 'keyword']) {
+            if (filters && filters[key] !== undefined && filters[key] !== '') {
+                params.set(key, String(filters[key]));
+            }
+        }
+        return await fetchAPI(`/api/history?${params}`);
     });
 
     ipcMain.handle('getNotificationConfig', async () => {
@@ -1053,9 +1072,16 @@ function setupIPC() {
 
     ipcMain.handle('unlockResize', (event, height) => {
         if (!unlockWindow || unlockWindow.isDestroyed()) return;
-        const h = Math.max(160, Math.min(520, Math.round(height) + 34)); // 34 = 标题栏
-        const [w] = unlockWindow.getSize();
-        unlockWindow.setSize(w, h);
+        if (event.sender !== unlockWindow.webContents || !Number.isFinite(height)) return;
+        const h = Math.max(160, Math.min(520, Math.round(height) + 34)); // 32px 自绘标题栏 + 2px 边框
+        // Windows 下不可缩放窗口会把 min/max 锁在当前尺寸，直接 setSize 无法缩小。
+        // 临时解除限制再调整内容区，随后恢复不可缩放；固定宽度避免 DPI 舍入累积。
+        unlockWindow.setResizable(true);
+        try {
+            unlockWindow.setContentSize(UNLOCK_WINDOW_WIDTH, h);
+        } finally {
+            unlockWindow.setResizable(false);
+        }
         unlockWindow.center();
     });
 

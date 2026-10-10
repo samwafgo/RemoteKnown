@@ -32,11 +32,12 @@ const (
 
 // NotificationConfig 通知配置
 type NotificationConfig struct {
-	Enabled    bool        `json:"enabled"`
-	Type       string      `json:"type"`        // "feishu" / "dingtalk" / "email"
-	WebhookURL string      `json:"webhook_url"` // Webhook URL（飞书/钉钉）
-	Secret     string      `json:"secret"`      // 签名密钥（可选，飞书/钉钉）
-	Email      EmailConfig `json:"email"`       // 邮件配置（Type == "email" 时使用）
+	Enabled    bool           `json:"enabled"`
+	Type       string         `json:"type"`        // "feishu" / "dingtalk" / "email" / "pushplus"
+	WebhookURL string         `json:"webhook_url"` // Webhook URL（飞书/钉钉）
+	Secret     string         `json:"secret"`      // 签名密钥（可选，飞书/钉钉）
+	Email      EmailConfig    `json:"email"`       // 邮件配置（Type == "email" 时使用）
+	PushPlus   PushPlusConfig `json:"pushplus"`    // PushPlus 配置（Type == "pushplus" 时使用）
 
 	RepeatEnabled  bool `json:"repeat_enabled"`  // 远程持续期间是否重复提醒
 	RepeatInterval int  `json:"repeat_interval"` // 重复提醒间隔（秒），最小 10，默认 600
@@ -66,7 +67,8 @@ type EmailConfig struct {
 
 // Notifier 通知器
 type Notifier struct {
-	storage *storage.Storage
+	storage        *storage.Storage
+	pushPlusClient *http.Client // 私有测试注入点；nil 时使用安全的生产默认值
 }
 
 // NewNotifier 创建新的通知器
@@ -290,6 +292,12 @@ func (n *Notifier) getConfig() (NotificationConfig, error) {
 		return config, nil
 	}
 
+	return parseNotificationConfigs(allConfigJSON)
+}
+
+// parseNotificationConfigs 单独解析配置，避免 PushPlus 混用 Webhook URL/签名字段。
+func parseNotificationConfigs(allConfigJSON string) (NotificationConfig, error) {
+	var config NotificationConfig
 	// 解析新格式的完整配置
 	var allConfigs map[string]interface{}
 	if err := json.Unmarshal([]byte(allConfigJSON), &allConfigs); err != nil {
@@ -323,6 +331,14 @@ func (n *Notifier) getConfig() (NotificationConfig, error) {
 				json.Unmarshal(b, &config.Email)
 			}
 		}
+	} else if currentType == "pushplus" {
+		if raw, ok := allConfigs["pushplus"]; ok {
+			b, err := json.Marshal(raw)
+			if err != nil || json.Unmarshal(b, &config.PushPlus) != nil {
+				return config, fmt.Errorf("PushPlus 配置格式错误，请检查 token/channel/option/to 字段")
+			}
+		}
+		config.PushPlus = config.PushPlus.Normalized()
 	} else if typeConfig, ok := allConfigs[currentType].(map[string]interface{}); ok {
 		if webhookURL, ok := typeConfig["webhook_url"].(string); ok {
 			config.WebhookURL = webhookURL
@@ -344,6 +360,8 @@ func (n *Notifier) sendNotification(config NotificationConfig, title, content st
 		return n.sendDingtalkNotification(config, title, content)
 	case "email":
 		return n.sendEmailNotification(config, title, content)
+	case "pushplus":
+		return n.sendPushPlusNotification(config.PushPlus, title, content)
 	default:
 		return fmt.Errorf("不支持的通知类型: %s", config.Type)
 	}

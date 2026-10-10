@@ -2,10 +2,13 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"sync"
 	"time"
@@ -157,25 +160,37 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	query, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil {
+		writeJSONError(w, "历史记录查询参数格式无效", http.StatusBadRequest)
+		return
+	}
+
 	// 解析分页参数
 	page := 1
 	pageSize := 5 // 默认每页5条
 
-	if pageStr := r.URL.Query().Get("page"); pageStr != "" {
+	if pageStr := query.Get("page"); pageStr != "" {
 		if p, err := strconv.Atoi(pageStr); err == nil && p > 0 {
 			page = p
 		}
 	}
 
-	if pageSizeStr := r.URL.Query().Get("pageSize"); pageSizeStr != "" {
+	if pageSizeStr := query.Get("pageSize"); pageSizeStr != "" {
 		if ps, err := strconv.Atoi(pageSizeStr); err == nil && ps > 0 {
 			pageSize = ps
 		}
 	}
 
-	sessions, total, err := s.detector.GetHistoryPaginated(page, pageSize)
+	filter, err := parseHistoryFilter(query)
 	if err != nil {
-		http.Error(w, "获取历史记录失败", http.StatusInternalServerError)
+		writeJSONError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	sessions, total, err := s.detector.GetHistoryPaginatedFiltered(page, pageSize, filter)
+	if err != nil {
+		writeJSONError(w, "获取历史记录失败", http.StatusInternalServerError)
 		return
 	}
 
@@ -190,6 +205,54 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
+}
+
+// time.Parse 本身还接受单数字小时、逗号小数、+24:00 等非 RFC3339 写法。
+var historyTimestampFormat = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?(Z|[+-]([01][0-9]|2[0-3]):[0-5][0-9])$`)
+
+func parseHistoryFilter(query url.Values) (storage.SessionFilter, error) {
+	filter := storage.SessionFilter{Keyword: query.Get("keyword")}
+	for _, bound := range []struct {
+		name   string
+		target **time.Time
+	}{
+		{"start_from", &filter.StartFrom},
+		{"start_to", &filter.StartTo},
+	} {
+		values, present := query[bound.name]
+		if !present {
+			continue
+		}
+		if len(values) != 1 {
+			return filter, fmt.Errorf("%s 只能指定一次", bound.name)
+		}
+		value, err := time.Parse(time.RFC3339, values[0])
+		if err != nil || !historyTimestampFormat.MatchString(values[0]) {
+			return filter, fmt.Errorf("%s 必须是有效的 RFC3339 时间", bound.name)
+		}
+		*bound.target = &value
+	}
+	for _, bound := range []struct {
+		name   string
+		target **int64
+	}{
+		{"min_duration", &filter.MinDuration},
+		{"max_duration", &filter.MaxDuration},
+	} {
+		values, present := query[bound.name]
+		if !present {
+			continue
+		}
+		if len(values) != 1 {
+			return filter, fmt.Errorf("%s 只能指定一次", bound.name)
+		}
+		value, err := strconv.ParseInt(values[0], 10, 64)
+		if err != nil || value < 0 {
+			return filter, fmt.Errorf("%s 必须是非负整数秒数（int64 范围内）", bound.name)
+		}
+		*bound.target = &value
+	}
+	return filter, filter.Validate()
 }
 
 func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
@@ -321,6 +384,10 @@ func (s *Server) handleNotification(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		if allConfigs["pushplus"] == nil {
+			allConfigs["pushplus"] = notifier.PushPlusConfig{Channel: "wechat"}
+		}
+
 		// 补齐重复提醒配置的默认值（老配置中不存在这两个字段）
 		if allConfigs["repeat_enabled"] == nil {
 			allConfigs["repeat_enabled"] = false
@@ -336,19 +403,30 @@ func (s *Server) handleNotification(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		// 保存通知配置
 		var newConfig struct {
-			Enabled        bool                   `json:"enabled"`
-			Type           string                 `json:"type"`
-			WebhookURL     string                 `json:"webhook_url"`
-			Secret         string                 `json:"secret"`
-			Email          map[string]interface{} `json:"email"`
-			RepeatEnabled  bool                   `json:"repeat_enabled"`
-			RepeatInterval int                    `json:"repeat_interval"`
+			Enabled        bool                    `json:"enabled"`
+			Type           string                  `json:"type"`
+			WebhookURL     string                  `json:"webhook_url"`
+			Secret         string                  `json:"secret"`
+			Email          map[string]interface{}  `json:"email"`
+			PushPlus       notifier.PushPlusConfig `json:"pushplus"`
+			RepeatEnabled  bool                    `json:"repeat_enabled"`
+			RepeatInterval int                     `json:"repeat_interval"`
 		}
 
 		if err := json.NewDecoder(r.Body).Decode(&newConfig); err != nil {
 			log.Printf("解析通知配置请求失败: %v", err)
 			http.Error(w, "Invalid request body", http.StatusBadRequest)
 			return
+		}
+
+		if newConfig.Type == "pushplus" {
+			if newConfig.Enabled {
+				if err := newConfig.PushPlus.Validate(); err != nil {
+					writeJSONError(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+			}
+			newConfig.PushPlus = newConfig.PushPlus.Normalized()
 		}
 
 		// 读取现有的完整配置
@@ -371,11 +449,13 @@ func (s *Server) handleNotification(w http.ResponseWriter, r *http.Request) {
 		allConfigs["repeat_enabled"] = newConfig.RepeatEnabled
 		allConfigs["repeat_interval"] = notifier.NormalizeRepeatInterval(newConfig.RepeatInterval)
 
-		// 更新对应类型的具体配置：邮件存到 email 子项，飞书/钉钉存 webhook_url+secret
+		// 按类型保存子项，保留其他通知渠道的配置。
 		if newConfig.Type == "email" {
 			if newConfig.Email != nil {
 				allConfigs["email"] = newConfig.Email
 			}
+		} else if newConfig.Type == "pushplus" {
+			allConfigs["pushplus"] = newConfig.PushPlus
 		} else {
 			allConfigs[newConfig.Type] = map[string]interface{}{
 				"webhook_url": newConfig.WebhookURL,
@@ -414,10 +494,11 @@ func (s *Server) handleTestNotification(w http.ResponseWriter, r *http.Request) 
 	}
 
 	var req struct {
-		Type       string               `json:"type"`
-		WebhookURL string               `json:"webhook_url"`
-		Secret     string               `json:"secret"`
-		Email      notifier.EmailConfig `json:"email"`
+		Type       string                  `json:"type"`
+		WebhookURL string                  `json:"webhook_url"`
+		Secret     string                  `json:"secret"`
+		Email      notifier.EmailConfig    `json:"email"`
+		PushPlus   notifier.PushPlusConfig `json:"pushplus"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -426,7 +507,13 @@ func (s *Server) handleTestNotification(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// 按类型校验必填项
-	if req.Type == "email" {
+	if req.Type == "pushplus" {
+		if err := req.PushPlus.Validate(); err != nil {
+			writeJSONError(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		req.PushPlus = req.PushPlus.Normalized()
+	} else if req.Type == "email" {
 		if req.Email.SMTPHost == "" || req.Email.From == "" || req.Email.To == "" {
 			http.Error(w, "请填写 SMTP 服务器、发件人和收件人", http.StatusBadRequest)
 			return
@@ -441,6 +528,7 @@ func (s *Server) handleTestNotification(w http.ResponseWriter, r *http.Request) 
 		WebhookURL: req.WebhookURL,
 		Secret:     req.Secret,
 		Email:      req.Email,
+		PushPlus:   req.PushPlus,
 		Enabled:    true,
 	}
 
@@ -455,10 +543,14 @@ func (s *Server) handleTestNotification(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	message := "测试通知发送成功"
+	if req.Type == "pushplus" {
+		message = "PushPlus 已接收推送请求，请检查所选渠道的实际投递结果"
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
-		"message": "测试通知发送成功",
+		"message": message,
 	})
 }
 

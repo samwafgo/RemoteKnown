@@ -3,7 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('remoteAudit', {
     getStatus: () => ipcRenderer.invoke('getStatus'),
     getHistory: () => ipcRenderer.invoke('getHistory'),
-    getHistoryPaginated: (page, pageSize) => ipcRenderer.invoke('getHistoryPaginated', page, pageSize),
+    getHistoryPaginated: (page, pageSize, filters) => ipcRenderer.invoke('getHistoryPaginated', page, pageSize, filters),
     getNotificationConfig: () => ipcRenderer.invoke('getNotificationConfig'),
     saveNotificationConfig: (config) => ipcRenderer.invoke('saveNotificationConfig', config),
     testNotification: (config) => ipcRenderer.invoke('testNotification', config),

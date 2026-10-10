@@ -352,6 +352,9 @@
         }
 
         .container {
+            box-sizing: border-box;
+            height: calc(100vh - 48px);
+            overflow-y: auto;
             padding: 20px;
         }
 
@@ -492,6 +495,66 @@
         .signal.bad {
             background: #fee2e2;
             color: #991b1b;
+        }
+
+        .history-filters {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: flex-end;
+            gap: 10px;
+            margin-bottom: 8px;
+        }
+
+        .history-field {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            flex: 1 1 180px;
+            min-width: 0;
+            font-size: 12px;
+            color: #666;
+        }
+
+        .history-field.duration-field {
+            flex: 0 1 100px;
+        }
+
+        .history-field.keyword-field {
+            flex-basis: calc(100% - 140px);
+        }
+
+        .history-field input {
+            box-sizing: border-box;
+            width: 100%;
+            height: 32px;
+            padding: 5px 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background: #fff;
+            color: #333;
+            font: inherit;
+        }
+
+        .history-field input:focus {
+            outline: 2px solid #3b82f6;
+            outline-offset: -1px;
+        }
+
+        .history-filter-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .history-filter-hint {
+            font-size: 11px;
+            color: #888;
+            margin: 8px 0 12px;
+        }
+
+        .history-filter-msg {
+            font-size: 12px;
+            color: #b91c1c;
+            margin: 8px 0;
         }
 
         .table-container {
@@ -800,6 +863,7 @@
 
         .settings-content {
             flex: 1;
+            min-width: 0;
             padding: 24px;
             overflow-y: auto;
             min-height: 0;
@@ -1065,6 +1129,7 @@
                                     <option value="feishu">飞书</option>
                                     <option value="dingtalk">钉钉</option>
                                     <option value="email">邮件 (SMTP)</option>
+                                    <option value="pushplus">PushPlus</option>
                                 </select>
                             </div>
                             <div class="form-group" id="webhookGroup">
@@ -1145,7 +1210,56 @@
                                     <input type="password" id="emailPassword" placeholder="公网邮箱填授权码（非登录密码）；内网匿名可留空">
                                 </div>
                             </div>
-                            <!-- 远程持续提醒：与通知类型无关，对飞书/钉钉/邮件都生效 -->
+                            <!-- PushPlus 配置：账号绑定及渠道配置在 PushPlus 网站完成 -->
+                            <div id="pushplusGroup" style="display: none;">
+                                <div class="form-group">
+                                    <label for="pushplusToken">PushPlus Token</label>
+                                    <input type="password" id="pushplusToken" autocomplete="off" spellcheck="false" placeholder="请输入 PushPlus 个人 Token">
+                                    <div class="help-text">在 PushPlus 官网获取个人 Token；请勿将它分享给他人。</div>
+                                </div>
+                                <div class="form-group">
+                                    <label for="pushplusChannel">推送渠道</label>
+                                    <select id="pushplusChannel">
+                                        <option value="wechat">微信公众号（默认）</option>
+                                        <option value="app">App</option>
+                                        <option value="extension">浏览器/桌面插件</option>
+                                        <option value="webhook">第三方 Webhook（企微/钉钉/飞书/Bark 等）</option>
+                                        <option value="clawbot">微信ClawBot</option>
+                                        <option value="cmcc">新消息ClawBot（仅中国移动）</option>
+                                        <option value="qq">QQ机器人</option>
+                                        <option value="cp">企业微信应用</option>
+                                        <option value="mail">邮件</option>
+                                        <option value="sms">短信（收费）</option>
+                                        <option value="voice">语音（收费）</option>
+                                    </select>
+                                    <div class="help-text" id="pushplusChannelHint"></div>
+                                </div>
+                                <div class="form-group" id="pushplusOptionGroup" style="display: none;">
+                                    <label for="pushplusOption" id="pushplusOptionLabel">渠道配置编码 option</label>
+                                    <input type="text" id="pushplusOption" autocomplete="off" spellcheck="false" aria-describedby="pushplusOptionHint">
+                                    <div class="help-text" id="pushplusOptionHint"></div>
+                                </div>
+                                <div class="form-group" id="pushplusToGroup">
+                                    <label for="pushplusTo" id="pushplusToLabel">接收人 to（可选）</label>
+                                    <input type="text" id="pushplusTo" autocomplete="off" spellcheck="false" aria-describedby="pushplusToHint">
+                                    <div class="help-text" id="pushplusToHint"></div>
+                                </div>
+                                <div class="form-group">
+                                    <div class="help-text">账号绑定、好友关系、应用/机器人和邮箱等渠道配置必须在 PushPlus 侧完成，本软件不会自动绑定或创建。</div>
+                                    <div class="help-text" id="pushplusChargeWarning" style="display: none; color: #b45309;">短信/语音会产生 PushPlus 服务费用；测试也可能收费。启用重复提醒前，请考虑提醒间隔、额度和费用。</div>
+                                    <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px;">
+                                        <button type="button" class="action-link" onclick="openExternal('https://www.pushplus.plus/push1.html')">获取 Token / 配置渠道</button>
+                                        <button type="button" class="action-link" onclick="openExternal('https://www.pushplus.plus/doc/guide/api.html')">官方 API 文档</button>
+                                    </div>
+                                </div>
+                                <details open class="form-group" style="background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 8px 12px;">
+                                    <summary style="cursor: pointer; font-size: 13px;">当前渠道怎么填 / 请求示例</summary>
+                                    <div class="help-text" id="pushplusExampleHint" style="line-height: 1.7;"></div>
+                                    <pre id="pushplusExample" style="white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.6; user-select: text;"></pre>
+                                    <div class="help-text">示例中的大写值仅为占位符，不会填入表单，也不会显示您的 Token。API 返回 200 仅表示请求被异步接受，不代表投递成功。</div>
+                                </details>
+                            </div>
+                            <!-- 远程持续提醒：与通知类型无关，对所有通知渠道都生效 -->
                             <div class="form-group" style="border-top: 1px solid #e5e7eb; padding-top: 14px;">
                                 <div class="checkbox-group">
                                     <input type="checkbox" id="repeatEnabled" name="repeat_enabled">
@@ -1159,7 +1273,7 @@
                                 <div class="help-text" id="repeatIntervalHint">最小 10 秒，默认 600 秒（10 分钟）</div>
                             </div>
                             <div class="form-group">
-                                <div id="testResult"
+                                <div id="testResult" role="status" aria-live="polite"
                                     style="display: none; padding: 8px; border-radius: 4px; font-size: 12px; margin-top: 8px;">
                                 </div>
                             </div>
@@ -1627,6 +1741,29 @@
                     <span>🔄</span>
                 </button>
             </h3>
+            <form class="history-filters" id="historyFilters">
+                <label class="history-field" for="historyStartFrom">开始时间 · 从
+                    <input id="historyStartFrom" type="datetime-local" step="1">
+                </label>
+                <label class="history-field" for="historyStartTo">开始时间 · 至
+                    <input id="historyStartTo" type="datetime-local" step="1">
+                </label>
+                <label class="history-field duration-field" for="historyMinDuration">最短时长（分钟）
+                    <input id="historyMinDuration" type="number" min="0" step="1" placeholder="不限">
+                </label>
+                <label class="history-field duration-field" for="historyMaxDuration">最长时长（分钟）
+                    <input id="historyMaxDuration" type="number" min="0" step="1" placeholder="不限">
+                </label>
+                <label class="history-field keyword-field" for="historyKeyword">判定依据
+                    <input id="historyKeyword" type="text" placeholder="工具名或依据，如 ToDesk / UDP">
+                </label>
+                <div class="history-filter-actions">
+                    <button class="pagination-btn active" type="submit">筛选</button>
+                    <button class="pagination-btn" type="button" onclick="resetHistoryFilters()">重置</button>
+                </div>
+            </form>
+            <p class="history-filter-hint">按会话开始时间筛选；时长条件仅匹配已结束的会话。</p>
+            <p class="history-filter-msg" id="historyFilterMsg" role="status" aria-live="polite" hidden></p>
             <div class="table-container">
                 <table>
                     <thead>
@@ -1658,6 +1795,9 @@
         let currentPage = 1;
         const pageSize = 5;
         let totalPages = 1;
+        let historyFilters = {};
+        let historyRequestSeq = 0;
+        let historyLoading = false;
 
         function render(data) {
             const active = data.remote_active;
@@ -1703,10 +1843,71 @@
             window.remoteAudit.onStatusUpdate(render);
         }
 
+        function historyMessage(text) {
+            const el = document.getElementById('historyFilterMsg');
+            el.textContent = text || '';
+            el.hidden = !text;
+        }
+
+        function applyHistoryFilters() {
+            const filters = {};
+            try {
+                for (const [id, key] of [['historyStartFrom', 'start_from'], ['historyStartTo', 'start_to']]) {
+                    const value = document.getElementById(id).value;
+                    if (value) {
+                        const date = new Date(value);
+                        if (!Number.isFinite(date.getTime())) throw new Error('请输入有效的开始时间');
+                        filters[key] = date.toISOString();
+                    }
+                }
+                for (const [id, key] of [['historyMinDuration', 'min_duration'], ['historyMaxDuration', 'max_duration']]) {
+                    const value = document.getElementById(id).value;
+                    if (value) {
+                        const seconds = Number(value) * 60;
+                        if (!Number.isInteger(Number(value)) || !Number.isSafeInteger(seconds) || seconds < 0) {
+                            throw new Error('持续时长请输入非负整数分钟');
+                        }
+                        filters[key] = seconds;
+                    }
+                }
+                if (filters.start_from && filters.start_to && filters.start_from > filters.start_to) {
+                    throw new Error('起始时间不能晚于截止时间');
+                }
+                if (filters.min_duration !== undefined && filters.max_duration !== undefined &&
+                    filters.min_duration > filters.max_duration) {
+                    throw new Error('最短时长不能大于最长时长');
+                }
+                const keyword = document.getElementById('historyKeyword').value.trim();
+                if (keyword) filters.keyword = keyword;
+            } catch (error) {
+                historyMessage(error.message);
+                return;
+            }
+            historyFilters = filters;
+            currentPage = 1;
+            loadHistory(1);
+        }
+
+        function resetHistoryFilters() {
+            document.getElementById('historyFilters').reset();
+            historyFilters = {};
+            currentPage = 1;
+            loadHistory(1);
+        }
+
+        document.getElementById('historyFilters').addEventListener('submit', e => {
+            e.preventDefault();
+            applyHistoryFilters();
+        });
+
         async function loadHistory(page = currentPage) {
+            const requestId = ++historyRequestSeq;
             const refreshBtn = document.getElementById('refreshHistoryBtn');
             const iconSpan = refreshBtn ? refreshBtn.querySelector('span') : null;
-
+            historyLoading = true;
+            historyMessage('');
+            document.getElementById('prevBtn').disabled = true;
+            document.getElementById('nextBtn').disabled = true;
             if (refreshBtn) {
                 refreshBtn.disabled = true;
                 if (iconSpan) {
@@ -1716,50 +1917,60 @@
                 }
             }
 
-            if (window.remoteAudit) {
-                try {
-                    // 调用带分页参数的API
-                    const response = await window.remoteAudit.getHistoryPaginated(page, pageSize);
-
-                    // 兼容旧格式（如果是数组）和新格式（如果是对象）
-                    let history = [];
-                    let total = 0;
-
-                    if (Array.isArray(response)) {
-                        // 旧格式：直接返回数组
-                        history = response;
-                        total = response.length;
-                        totalPages = 1;
-                    } else if (response && response.sessions) {
-                        // 新格式：分页响应
-                        history = response.sessions || [];
-                        total = response.total || 0;
-                        totalPages = response.totalPages || 1;
-                        currentPage = response.page || page;
+            try {
+                if (!window.remoteAudit) throw new Error('界面与主进程连接不可用');
+                const response = await window.remoteAudit.getHistoryPaginated(page, pageSize, historyFilters);
+                if (requestId !== historyRequestSeq) return;
+                let history = [];
+                let total = 0;
+                if (Array.isArray(response)) {
+                    history = response;
+                    total = response.length;
+                    totalPages = 1;
+                    currentPage = 1;
+                } else if (response && Array.isArray(response.sessions)) {
+                    history = response.sessions;
+                    total = response.total || 0;
+                    totalPages = Math.max(1, response.totalPages || 0);
+                    currentPage = response.page || page;
+                    if (total > 0 && currentPage > totalPages) {
+                        await loadHistory(totalPages);
+                        return;
                     }
-
-                    renderHistory(history);
-                    updatePagination(total, currentPage, totalPages);
-                } catch (error) {
-                    console.error('加载历史记录失败:', error);
-                    renderHistory([]);
-                    updatePagination(0, 1, 1);
+                } else {
+                    throw new Error('历史记录响应格式不正确');
                 }
-            }
-
-            if (refreshBtn) {
-                setTimeout(() => {
-                    refreshBtn.disabled = false;
-                    if (iconSpan) {
-                        iconSpan.style.transform = 'rotate(0deg)';
-                        iconSpan.style.transition = 'none';
+                renderHistory(history);
+                updatePagination(total, currentPage, totalPages);
+            } catch (error) {
+                if (requestId !== historyRequestSeq) return;
+                console.error('加载历史记录失败:', error);
+                historyMessage('加载失败：' + error.message);
+                renderHistory([], '历史记录加载失败，请刷新重试');
+                currentPage = 1;
+                totalPages = 1;
+                updatePagination(0, 1, 1);
+            } finally {
+                if (requestId === historyRequestSeq) {
+                    historyLoading = false;
+                    document.getElementById('prevBtn').disabled = currentPage <= 1;
+                    document.getElementById('nextBtn').disabled = currentPage >= totalPages;
+                    if (refreshBtn) {
+                        setTimeout(() => {
+                            if (requestId !== historyRequestSeq) return;
+                            refreshBtn.disabled = false;
+                            if (iconSpan) {
+                                iconSpan.style.transform = 'rotate(0deg)';
+                                iconSpan.style.transition = 'none';
+                            }
+                        }, 500);
                     }
-                }, 500); // 至少旋转0.5秒以免闪烁
+                }
             }
         }
 
         function changePage(page) {
-            if (page < 1 || page > totalPages) {
+            if (historyLoading || page < 1 || page > totalPages) {
                 return;
             }
             currentPage = page;
@@ -1784,44 +1995,49 @@
             nextBtn.disabled = page >= totalPages;
         }
 
-        function renderHistory(history) {
+        function renderHistory(history, emptyMessage) {
             const tbody = document.getElementById('history');
-            tbody.innerHTML = '';
+            tbody.replaceChildren();
 
             if (!history || history.length === 0) {
                 const row = document.createElement('tr');
-                row.innerHTML = '<td colspan="4" style="text-align: center; color: #999;">暂无审计记录</td>';
+                const cell = document.createElement('td');
+                cell.colSpan = 4;
+                cell.style.cssText = 'text-align: center; color: #999;';
+                cell.textContent = emptyMessage || (Object.keys(historyFilters).length ? '没有符合筛选条件的审计记录' : '暂无审计记录');
+                row.appendChild(cell);
                 tbody.appendChild(row);
                 return;
             }
 
             history.forEach(session => {
                 const row = document.createElement('tr');
-                // 处理 end_time：可能是 null、undefined 或空字符串
-                let endTime = '-';
-                if (session.end_time) {
-                    try {
-                        endTime = new Date(session.end_time).toLocaleString('zh-CN');
-                    } catch (e) {
-                        endTime = '-';
-                    }
-                }
-
-                // 处理 duration：只有会话已结束（有 end_time）才显示时长
+                const startTime = session.start_time ? new Date(session.start_time).toLocaleString('zh-CN') : '-';
+                const endTime = session.end_time ? new Date(session.end_time).toLocaleString('zh-CN') : '-';
                 let duration = '-';
                 if (session.end_time && session.duration !== null && session.duration !== undefined) {
-                    const durationSeconds = typeof session.duration === 'number' ? session.duration : parseInt(session.duration);
-                    if (!isNaN(durationSeconds) && durationSeconds >= 0) {
+                    const durationSeconds = Number(session.duration);
+                    if (Number.isFinite(durationSeconds) && durationSeconds >= 0) {
                         duration = formatDuration(durationSeconds);
                     }
                 }
-
-                row.innerHTML = `
-            <td>${session.start_time ? new Date(session.start_time).toLocaleString('zh-CN') : '-'}</td>
-            <td>${endTime}</td>
-            <td>${duration}</td>
-            <td>${formatSignals(session.signals)}</td>
-        `;
+                for (const text of [startTime, endTime, duration]) {
+                    const cell = document.createElement('td');
+                    cell.textContent = text;
+                    row.appendChild(cell);
+                }
+                const signals = document.createElement('td');
+                if (session.signals) {
+                    String(session.signals).split(',').forEach(text => {
+                        const badge = document.createElement('span');
+                        badge.className = 'signal bad';
+                        badge.textContent = text.trim();
+                        signals.appendChild(badge);
+                    });
+                } else {
+                    signals.textContent = '-';
+                }
+                row.appendChild(signals);
                 tbody.appendChild(row);
             });
         }
@@ -1831,11 +2047,6 @@
             const m = Math.floor((seconds % 3600) / 60);
             const s = seconds % 60;
             return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-        }
-
-        function formatSignals(signalsStr) {
-            if (!signalsStr) return '-';
-            return signalsStr.split(',').map(s => `<span class="signal bad">${s.trim()}</span>`).join('');
         }
 
         loadHistory();
@@ -3229,7 +3440,8 @@
         let notificationConfigs = {
             feishu: { webhook_url: '', secret: '' },
             dingtalk: { webhook_url: '', secret: '' },
-            email: { smtp_host: '', smtp_port: '', encryption: 'none', username: '', password: '', from: '', to: '' }
+            email: { smtp_host: '', smtp_port: '', encryption: 'none', username: '', password: '', from: '', to: '' },
+            pushplus: { token: '', channel: 'wechat', option: '', to: '' }
         };
         let currentNotificationType = 'feishu';
 
@@ -3259,11 +3471,128 @@
             document.getElementById('emailTo').value = cfg.to || '';
         }
 
+        // PushPlus 渠道定义与示例都是固定文本，绝不把账号数据插入 HTML 或示例。
+        const PUSHPLUS_CHANNELS = {
+            wechat: {
+                hint: '先在 PushPlus 绑定并关注微信公众号；默认发送给自己。',
+                to: true,
+                exampleHint: 'channel 填 wechat；to 留空发给自己，发给好友需填写好友 Token，多个用英文逗号分隔。',
+                exampleTo: 'FRIEND_TOKEN_1,FRIEND_TOKEN_2'
+            },
+            app: { hint: '先在 PushPlus 侧绑定 App 并登录。', exampleHint: 'channel 填 app，无需 option 或 to。' },
+            extension: { hint: '先安装并绑定 PushPlus 浏览器/桌面插件。', exampleHint: 'channel 填 extension，无需 option 或 to。' },
+            webhook: {
+                hint: '先在 PushPlus 配置企微/钉钉/飞书/Bark 等第三方 Webhook。',
+                option: true, requiredOption: true,
+                optionHint: '必填：PushPlus 侧的 Webhook 配置编码，不是 Webhook URL。option 是旧参数 webhook 的新名称。',
+                exampleHint: 'channel 填 webhook；option 必须填已配置的第三方 Webhook 编码，不支持 to。',
+                exampleOption: 'WEBHOOK_CONFIG_CODE'
+            },
+            clawbot: { hint: '先在 PushPlus 侧绑定微信ClawBot。', exampleHint: 'channel 填 clawbot，无需 option 或 to。' },
+            cmcc: { hint: '仅支持中国移动号码；先在 PushPlus 侧绑定新消息ClawBot。', exampleHint: 'channel 填 cmcc，仅中国移动可用，无需 option 或 to。' },
+            qq: {
+                hint: '先在 PushPlus 侧绑定 QQ机器人；option 留空时发送给自己。',
+                option: true, to: true,
+                optionHint: '可选：已配置的 QQ机器人/群编码。留空发给自己；若渠道编码对应QQ群，请勿同时填写接收人。',
+                exampleHint: 'channel 填 qq；option 可指定已配置的机器人/群，to 可填好友 Token（逗号分隔）；若 option 对应QQ群，请勿同时填写 to。',
+                exampleOption: 'QQ_BOT_OR_GROUP_CODE'
+            },
+            cp: {
+                hint: '先在 PushPlus 配置企业微信应用及接收用户。',
+                option: true, requiredOption: true, to: true,
+                optionHint: '必填：PushPlus 侧的企业微信应用配置编码（不是企业 ID 或应用密钥）。',
+                exampleHint: 'channel 填 cp；option 必填企业微信应用配置编码，to 可填企业微信 userId（不是好友 Token），多个用英文逗号分隔。',
+                exampleOption: 'CP_APP_CONFIG_CODE', exampleTo: 'USER_ID_1,USER_ID_2'
+            },
+            mail: {
+                hint: '先在 PushPlus 侧绑定邮箱；可选自定义邮件配置，否则使用官方邮件。',
+                option: true, to: true,
+                optionHint: '可选：PushPlus 侧的自定义邮件配置编码；留空使用官方邮件，不是在这里填写 SMTP 参数。',
+                exampleHint: 'channel 填 mail；option 可填自定义邮件配置编码，留空使用官方邮件；to 留空发给自己，也可填好友 Token（不是邮箱地址），多个用英文逗号分隔。',
+                exampleOption: 'MAIL_CONFIG_CODE', exampleTo: 'FRIEND_TOKEN_1,FRIEND_TOKEN_2'
+            },
+            sms: { hint: '先在 PushPlus 侧绑定手机并确认短信服务额度。', exampleHint: 'channel 填 sms，无需 option 或 to；短信服务收费。', charged: true },
+            voice: { hint: '先在 PushPlus 侧绑定手机并确认语音服务额度。', exampleHint: 'channel 填 voice，无需 option 或 to；语音服务收费。', charged: true }
+        };
+        let currentPushPlusChannel = 'wechat';
+        let pushplusChannelDrafts = {};
+
+        function cachePushPlusChannel() {
+            pushplusChannelDrafts[currentPushPlusChannel] = {
+                option: document.getElementById('pushplusOption').value,
+                to: document.getElementById('pushplusTo').value
+            };
+        }
+
+        // 只发送当前渠道支持的字段，隐藏字段草稿不会混入后端请求。
+        function getPushPlusFormConfig() {
+            const channel = document.getElementById('pushplusChannel').value || 'wechat';
+            const fields = PUSHPLUS_CHANNELS[channel];
+            return {
+                token: document.getElementById('pushplusToken').value.trim(),
+                channel: channel,
+                option: fields.option ? document.getElementById('pushplusOption').value.trim() : '',
+                to: fields.to ? document.getElementById('pushplusTo').value.trim() : ''
+            };
+        }
+
+        function setPushPlusFormConfig(cfg) {
+            cfg = cfg || {};
+            currentPushPlusChannel = Object.hasOwn(PUSHPLUS_CHANNELS, cfg.channel) ? cfg.channel : 'wechat';
+            document.getElementById('pushplusToken').value = cfg.token || '';
+            document.getElementById('pushplusChannel').value = currentPushPlusChannel;
+            // drafts 仅在界面内存缓存里存在，绝不持久化或传给 IPC。
+            pushplusChannelDrafts = cfg.drafts || {};
+            const draft = pushplusChannelDrafts[currentPushPlusChannel] || cfg;
+            document.getElementById('pushplusOption').value = draft.option || '';
+            document.getElementById('pushplusTo').value = draft.to || '';
+            updatePushPlusFields();
+        }
+
+        function updatePushPlusFields() {
+            const channel = document.getElementById('pushplusChannel').value;
+            const fields = PUSHPLUS_CHANNELS[channel];
+            document.getElementById('pushplusOptionGroup').style.display = fields.option ? 'block' : 'none';
+            document.getElementById('pushplusToGroup').style.display = fields.to ? 'block' : 'none';
+            document.getElementById('pushplusChannelHint').textContent = fields.hint;
+            document.getElementById('pushplusOptionLabel').textContent = '渠道配置编码 option（' + (fields.requiredOption ? '必填' : '可选') + '）';
+            document.getElementById('pushplusOption').placeholder = fields.exampleOption || '';
+            document.getElementById('pushplusOptionHint').textContent = fields.optionHint || '';
+            document.getElementById('pushplusToLabel').textContent = channel === 'cp' ? '企业微信 userId（可选）' : '接收人 to（可选）';
+            document.getElementById('pushplusTo').placeholder = channel === 'cp' ? 'USER_ID_1,USER_ID_2' : 'FRIEND_TOKEN_1,FRIEND_TOKEN_2';
+            document.getElementById('pushplusToHint').textContent = channel === 'cp'
+                ? '填写企业微信 userId，多个用英文逗号分隔。'
+                : '留空发给自己；填写 PushPlus 好友 Token（不是邮箱地址或 QQ号），多个用英文逗号分隔。';
+            document.getElementById('pushplusChargeWarning').style.display = fields.charged ? 'block' : 'none';
+            document.getElementById('pushplusExampleHint').textContent = fields.exampleHint;
+            const example = { token: 'YOUR_PUSHPLUS_TOKEN', title: '远程知道了测试通知', content: '测试通知内容', template: 'txt', channel: channel };
+            if (fields.exampleOption) example.option = fields.exampleOption;
+            if (fields.exampleTo) example.to = fields.exampleTo;
+            document.getElementById('pushplusExample').textContent = 'POST https://www.pushplus.plus/send\nContent-Type: application/json\n\n' + JSON.stringify(example, null, 2);
+        }
+
+        function validatePushPlusConfig(cfg) {
+            if (!cfg.token) return '请填写 PushPlus Token';
+            if (PUSHPLUS_CHANNELS[cfg.channel].requiredOption && !cfg.option) return '所选 PushPlus 渠道必须填写配置编码 option';
+            return '';
+        }
+
+        document.getElementById('pushplusChannel').addEventListener('change', function () {
+            cachePushPlusChannel();
+            currentPushPlusChannel = this.value;
+            const draft = pushplusChannelDrafts[currentPushPlusChannel] || {};
+            document.getElementById('pushplusOption').value = draft.option || '';
+            document.getElementById('pushplusTo').value = draft.to || '';
+            updatePushPlusFields();
+        });
+        updatePushPlusFields();
+
         // 根据通知类型显示/隐藏对应的字段分组
         function updateNotificationFields(type) {
             const isEmail = type === 'email';
-            document.getElementById('webhookGroup').style.display = isEmail ? 'none' : 'block';
+            document.getElementById('webhookGroup').style.display = (isEmail || type === 'pushplus') ? 'none' : 'block';
             document.getElementById('emailGroup').style.display = isEmail ? 'block' : 'none';
+            document.getElementById('pushplusGroup').style.display = type === 'pushplus' ? 'block' : 'none';
             // 签名密钥仅钉钉需要
             document.getElementById('secretGroup').style.display = (type === 'dingtalk') ? 'block' : 'none';
         }
@@ -3306,6 +3635,9 @@
         function saveTypeToCache(type) {
             if (type === 'email') {
                 notificationConfigs.email = getEmailFormConfig();
+            } else if (type === 'pushplus') {
+                cachePushPlusChannel();
+                notificationConfigs.pushplus = { ...getPushPlusFormConfig(), drafts: { ...pushplusChannelDrafts } };
             } else {
                 notificationConfigs[type] = {
                     webhook_url: document.getElementById('webhookURL').value.trim(),
@@ -3318,6 +3650,8 @@
         function loadTypeFromCache(type) {
             if (type === 'email') {
                 setEmailFormConfig(notificationConfigs.email);
+            } else if (type === 'pushplus') {
+                setPushPlusFormConfig(notificationConfigs.pushplus);
             } else {
                 const config = notificationConfigs[type] || {};
                 document.getElementById('webhookURL').value = config.webhook_url || '';
@@ -3368,6 +3702,9 @@
             try {
                 const config = await window.remoteAudit.getNotificationConfig();
                 if (config) {
+                    const testResult = document.getElementById('testResult');
+                    testResult.style.display = 'none';
+                    testResult.textContent = '';
                     // 加载基本配置
                     document.getElementById('notificationEnabled').checked = config.enabled || false;
                     currentNotificationType = config.type || 'feishu';
@@ -3398,6 +3735,15 @@
                         };
                     }
 
+                    if (config.pushplus) {
+                        notificationConfigs.pushplus = {
+                            token: config.pushplus.token || '',
+                            channel: config.pushplus.channel || 'wechat',
+                            option: config.pushplus.option || '',
+                            to: config.pushplus.to || ''
+                        };
+                    }
+
                     // 远程持续提醒（全局配置，与通知类型无关）
                     document.getElementById('repeatEnabled').checked = config.repeat_enabled || false;
                     document.getElementById('repeatInterval').value = config.repeat_interval || 600;
@@ -3409,6 +3755,10 @@
                 }
             } catch (error) {
                 console.error('加载通知配置失败:', error);
+                const testResult = document.getElementById('testResult');
+                testResult.style.display = 'block';
+                testResult.className = 'test-result error';
+                testResult.textContent = '加载通知配置失败：' + (error.message || '未知错误');
             }
         }
 
@@ -3430,6 +3780,16 @@
                     return;
                 }
                 config = { type: 'email', email: email };
+            } else if (type === 'pushplus') {
+                const pushplus = getPushPlusFormConfig();
+                const error = validatePushPlusConfig(pushplus);
+                if (error) {
+                    testResult.style.display = 'block';
+                    testResult.className = 'test-result error';
+                    testResult.textContent = error;
+                    return;
+                }
+                config = { type: 'pushplus', pushplus: pushplus };
             } else {
                 config = {
                     type: type,
@@ -3455,9 +3815,11 @@
                 const result = await window.remoteAudit.testNotification(config);
                 if (result && result.success) {
                     testResult.className = 'test-result success';
-                    testResult.textContent = (type === 'email')
-                        ? '✓ 测试邮件发送成功！请检查收件箱（含垃圾邮件）。'
-                        : '✓ 测试通知发送成功！请检查您的飞书/钉钉是否收到消息。';
+                    testResult.textContent = type === 'pushplus'
+                        ? '已提交推送，请检查所选渠道；实际投递结果以 PushPlus 为准'
+                        : (type === 'email'
+                            ? '✓ 测试邮件发送成功！请检查收件箱（含垃圾邮件）。'
+                            : '✓ 测试通知发送成功！请检查您的飞书/钉钉是否收到消息。');
                 } else {
                     testResult.className = 'test-result error';
                     testResult.textContent = '✗ 测试失败: ' + (result?.error || '未知错误');
@@ -3494,6 +3856,14 @@
                     return;
                 }
                 config = { enabled: enabled, type: type, email: email };
+            } else if (type === 'pushplus') {
+                const pushplus = getPushPlusFormConfig();
+                const error = validatePushPlusConfig(pushplus);
+                if (enabled && error) {
+                    alert(error);
+                    return;
+                }
+                config = { enabled: enabled, type: 'pushplus', pushplus: pushplus };
             } else {
                 config = {
                     enabled: enabled,
@@ -3512,6 +3882,10 @@
 
             try {
                 const result = await window.remoteAudit.saveNotificationConfig(config);
+                // 明确失败不能被兼容性分支误报为保存成功。
+                if (result && (result.success === false || result.error)) {
+                    throw new Error(result.error || '服务器拒绝保存配置');
+                }
                 // 检查返回结果
                 if (result && (result.status === 'success' || result.success)) {
                     alert('保存成功');

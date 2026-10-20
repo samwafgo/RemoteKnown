@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"RemoteKnown/internal/storage"
+
+	"github.com/google/uuid"
 )
 
 // 触发方式
@@ -26,29 +28,31 @@ const (
 
 // 配置项在 KV 表里的键名
 const (
-	keyTrigger    = "privacy_trigger"
-	keyBgColor    = "privacy_bg_color"
-	keyImage      = "privacy_image"
-	keyFit        = "privacy_fit"
-	keyShowText   = "privacy_show_text"
-	keyText       = "privacy_text"
-	keyFont       = "privacy_font"
-	keyFontSize   = "privacy_font_size"
-	keyBold       = "privacy_bold"
-	keyFgColor    = "privacy_fg_color"
-	keyHideCursor = "privacy_hide_cursor"
-	keyBlockInput = "privacy_block_input"
-	keyRequirePw  = "privacy_require_password"
-	keyHotkey     = "privacy_hotkey"
-	keyMaxMinutes = "privacy_max_minutes"
-	keyDropOnEnd  = "privacy_drop_on_end"
-	keyLockOnEnd  = "privacy_lock_on_end"
+	keyAutoCountdown = "privacy_auto_countdown"
+	keyTrigger       = "privacy_trigger"
+	keyBgColor       = "privacy_bg_color"
+	keyImage         = "privacy_image"
+	keyFit           = "privacy_fit"
+	keyShowText      = "privacy_show_text"
+	keyText          = "privacy_text"
+	keyFont          = "privacy_font"
+	keyFontSize      = "privacy_font_size"
+	keyBold          = "privacy_bold"
+	keyFgColor       = "privacy_fg_color"
+	keyHideCursor    = "privacy_hide_cursor"
+	keyBlockInput    = "privacy_block_input"
+	keyRequirePw     = "privacy_require_password"
+	keyHotkey        = "privacy_hotkey"
+	keyMaxMinutes    = "privacy_max_minutes"
+	keyDropOnEnd     = "privacy_drop_on_end"
+	keyLockOnEnd     = "privacy_lock_on_end"
 )
 
 // Options 隐私屏的全部可配置项。
 // 外观部分与 tech_doc/toolcmd/privacydemo 的命令行选项一一对应。
 type Options struct {
-	Trigger string `json:"trigger"` // off / manual / auto
+	Trigger       string `json:"trigger"`        // off / manual / auto
+	AutoCountdown bool   `json:"auto_countdown"` // 自动开启前显示 10 秒倒计时，默认关闭
 
 	// 外观
 	BgColor  string `json:"bg_color"`  // #RRGGBB
@@ -77,6 +81,7 @@ type Options struct {
 func DefaultOptions() Options {
 	return Options{
 		Trigger:         TriggerOff,
+		AutoCountdown:   false,
 		BgColor:         "#0A2A43",
 		Fit:             "cover",
 		ShowText:        true,
@@ -107,6 +112,9 @@ type Status struct {
 	StartedAt     string `json:"started_at"`     //
 	UnlockPending bool   `json:"unlock_pending"` // 用户按了热键，等待前端弹解锁框
 	LastError     string `json:"last_error"`     // 最近一次失败原因
+	AutoPending   bool   `json:"auto_pending"`   // 自动开启前等待用户取消
+	AutoRequestID string `json:"auto_request_id"`
+	AutoDeadline  string `json:"auto_deadline"` // RFC3339Nano
 
 	// Uncovered 遮罩盖不住的窗口类名。典型是任务管理器这类 UIAccess 提权窗口，
 	// 普通权限进程抢不到它上面去。这些窗口在遮罩期间仍然可见，属于没遮住，
@@ -120,22 +128,45 @@ type Alerter interface {
 	NotifySecurityEvent(title string, lines []string)
 }
 
+const autoPromptDelay = 10 * time.Second
+
+// ErrAutoRequestExpired 表示请求已处理、过期或属于旧会话。
+var ErrAutoRequestExpired = errors.New("自动隐私屏请求已过期或失效")
+
+// maskEngine 让状态机可在测试中使用空引擎，避免真正遮住屏幕。
+type maskEngine interface {
+	active() bool
+	unlockPending() bool
+	uncoveredWindows() []string
+	clearUnlockPending()
+	start(Options) error
+	stop()
+}
+
 // Manager 隐私屏的对外入口
 type Manager struct {
 	store *storage.Storage
 	alert Alerter
 
 	mu        sync.Mutex
-	eng       *engine
+	eng       maskEngine
 	startedAt time.Time
 	lastErr   string
+
+	remoteActive  bool
+	shutdown      bool
+	autoRequestID string
+	autoDeadline  time.Time
+	autoShown     bool
+	autoTimer     *time.Timer
 }
 
 func NewManager(store *storage.Storage, alert Alerter) *Manager {
 	m := &Manager{store: store, alert: alert}
-	m.eng = newEngine()
-	m.eng.onFail = m.handleEngineFailure
-	m.eng.onStopped = m.handleEngineStopped
+	eng := newEngine()
+	eng.onFail = m.handleEngineFailure
+	eng.onStopped = m.handleEngineStopped
+	m.eng = eng
 	// 上次若是崩溃退出，系统光标可能还停在隐藏状态 —— 无条件复位一次
 	resetCursorsOnStartup()
 	return m
@@ -176,6 +207,7 @@ func (m *Manager) Options() Options {
 	d := DefaultOptions()
 	return Options{
 		Trigger:         m.getStr(keyTrigger, d.Trigger),
+		AutoCountdown:   m.getBool(keyAutoCountdown, d.AutoCountdown),
 		BgColor:         m.getStr(keyBgColor, d.BgColor),
 		Image:           m.getStr(keyImage, d.Image),
 		Fit:             m.getStr(keyFit, d.Fit),
@@ -197,11 +229,14 @@ func (m *Manager) Options() Options {
 
 // SaveOptions 写入配置，写前做一遍取值校正
 func (m *Manager) SaveOptions(o Options) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	o = sanitize(o)
 	pairs := []struct {
 		k, v string
 	}{
 		{keyTrigger, o.Trigger},
+		{keyAutoCountdown, boolStr(o.AutoCountdown)},
 		{keyBgColor, o.BgColor},
 		{keyImage, o.Image},
 		{keyFit, o.Fit},
@@ -222,6 +257,10 @@ func (m *Manager) SaveOptions(o Options) error {
 	for _, p := range pairs {
 		if err := m.store.SetConfig(p.k, p.v); err != nil {
 			return err
+		}
+		if (p.k == keyTrigger && o.Trigger != TriggerAuto) ||
+			(p.k == keyAutoCountdown && !o.AutoCountdown) {
+			m.cancelAutoLocked()
 		}
 	}
 	return nil
@@ -363,6 +402,11 @@ func (m *Manager) Status() Status {
 	if !m.startedAt.IsZero() {
 		st.StartedAt = m.startedAt.Format(time.RFC3339)
 	}
+	if m.autoRequestID != "" {
+		st.AutoPending = true
+		st.AutoRequestID = m.autoRequestID
+		st.AutoDeadline = m.autoDeadline.Format(time.RFC3339Nano)
+	}
 	return st
 }
 
@@ -374,7 +418,14 @@ func (m *Manager) Status() Status {
 func (m *Manager) Enable(reason string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.cancelAutoLocked()
+	return m.enableLocked(reason)
+}
 
+func (m *Manager) enableLocked(reason string) error {
+	if m.shutdown {
+		return errors.New("隐私屏模块已退出")
+	}
 	if m.eng.active() {
 		return nil
 	}
@@ -411,6 +462,7 @@ func (m *Manager) Disable(reason string) {
 
 // disableLocked 撤除遮罩并通知。waitForNotify 只在进程退出时为真。
 func (m *Manager) disableLocked(reason string, waitForNotify bool) {
+	m.cancelAutoLocked()
 	if !m.eng.active() {
 		return
 	}
@@ -477,23 +529,115 @@ func (m *Manager) ClearUnlockPending() {
 
 // ---------- 与检测器联动 ----------
 
-// OnRemoteStart 检测到远程会话开始
-func (m *Manager) OnRemoteStart() {
-	if m.Options().Trigger != TriggerAuto {
+// cancelAutoLocked 清除请求，同时让已进入调度队列的旧回调失效。
+func (m *Manager) cancelAutoLocked() {
+	if m.autoTimer != nil {
+		m.autoTimer.Stop()
+		m.autoTimer = nil
+	}
+	m.autoRequestID = ""
+	m.autoDeadline = time.Time{}
+	m.autoShown = false
+}
+
+func (m *Manager) scheduleAutoLocked() {
+	if m.autoTimer != nil {
+		m.autoTimer.Stop()
+	}
+	id, deadline := m.autoRequestID, m.autoDeadline
+	m.autoTimer = time.AfterFunc(time.Until(deadline), func() {
+		m.finishAuto(id, deadline)
+	})
+}
+
+func (m *Manager) finishAuto(id string, deadline time.Time) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	// shown 会保留 ID 并更新 deadline，因此两者都要核对。
+	if m.shutdown || id == "" || m.autoRequestID != id || !m.autoDeadline.Equal(deadline) {
 		return
 	}
-	if err := m.Enable("检测到远程会话"); err != nil {
+	if time.Now().Before(deadline) {
+		m.scheduleAutoLocked()
+		return
+	}
+	m.cancelAutoLocked()
+	o := m.Options()
+	if !m.remoteActive || o.Trigger != TriggerAuto || !o.AutoCountdown {
+		return
+	}
+	if err := m.enableLocked("检测到远程会话"); err != nil {
 		log.Printf("[隐私屏] 自动开启失败: %v", err)
 	}
 }
 
+// AutoAction 仅处理当前未过期的提示请求，不涉及已生效遮罩的密码保护。
+// shown 只在窗口首次 ready 时续一次完整倒计时，重复上报不会继续延期。
+func (m *Manager) AutoAction(requestID, action string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.shutdown || requestID == "" || requestID != m.autoRequestID ||
+		!time.Now().Before(m.autoDeadline) {
+		return ErrAutoRequestExpired
+	}
+	switch action {
+	case "shown":
+		if !m.autoShown {
+			m.autoShown = true
+			m.autoDeadline = time.Now().Add(autoPromptDelay)
+			m.scheduleAutoLocked()
+		}
+	case "cancel":
+		m.cancelAutoLocked()
+		log.Printf("[隐私屏] 用户取消本次自动开启")
+		m.notify("本次隐私屏自动开启已取消", []string{
+			"操作：用户在倒计时提示中取消了本次隐私屏自动开启。",
+			"结果：本次远程会话不再自动开启隐私屏，本机屏幕仍可见。",
+			"远程检测、会话记录和远程会话通知继续正常运行。",
+		}, false)
+	default:
+		return errors.New("自动隐私屏操作必须为 shown 或 cancel")
+	}
+	return nil
+}
+
+// OnRemoteStart 同一会话只创建一次请求，取消后不会在轮询中重复提示。
+func (m *Manager) OnRemoteStart() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.shutdown || m.remoteActive {
+		return
+	}
+	m.remoteActive = true
+	o := m.Options()
+	if o.Trigger != TriggerAuto || m.eng.active() {
+		return
+	}
+	if !o.AutoCountdown {
+		if err := m.enableLocked("检测到远程会话"); err != nil {
+			log.Printf("[隐私屏] 自动开启失败: %v", err)
+		}
+		return
+	}
+	m.autoRequestID = uuid.NewString()
+	m.autoDeadline = time.Now().Add(autoPromptDelay)
+	m.autoShown = false
+	m.scheduleAutoLocked()
+}
+
 // OnRemoteEnd 远程会话结束：按配置撤除遮罩、并可选地锁定 Windows
 func (m *Manager) OnRemoteEnd() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.remoteActive = false
+	m.cancelAutoLocked()
+	if m.shutdown {
+		return
+	}
 	o := m.Options()
-
 	if o.DropOnEnd {
 		// 没人在操作了，遮罩不该继续盖着；这一步不要求密码
-		m.Disable("远程会话结束")
+		m.disableLocked("远程会话结束", false)
 	}
 	if o.LockOnEnd {
 		if err := lockWorkstation(); err != nil {
@@ -508,5 +652,6 @@ func (m *Manager) OnRemoteEnd() {
 func (m *Manager) Shutdown() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.shutdown = true
 	m.disableLocked("程序退出", true)
 }

@@ -1547,6 +1547,16 @@
                         </div>
 
                         <div class="form-group">
+                            <label style="display:flex; align-items:center; gap:8px;">
+                                <input type="checkbox" id="privacyAutoCountdown" style="width:auto;">
+                                自动开启前显示 10 秒倒计时
+                            </label>
+                            <div class="help-text">默认关闭，仅在“检测到远程时自动”模式下生效，修改后需保存。<br>
+                                适用场景：本机有人值守，或本机主动控制其他电脑，希望在误触发时保留取消遮屏的机会。<br>
+                                开启后，10 秒内未操作会自动遮屏；点击“本次不开启”会取消本次遮屏，并通过已启用的通知渠道发送取消通知。检测记录和会话通知照常。</div>
+                        </div>
+
+                        <div class="form-group">
                             <label>遮罩背景</label>
                             <div style="display:flex; gap:8px;">
                                 <select id="privacyPreset" style="flex:1;" onchange="privacyPresetPick()"></select>
@@ -2187,6 +2197,10 @@
                     const t = new Date(st.started_at);
                     if (!isNaN(t)) html += '　开始于 ' + t.toLocaleTimeString();
                 }
+            } else if (st.auto_pending) {
+                box.style.background = '#fff7ed';
+                box.style.borderColor = '#fed7aa';
+                html = '<b style="color:#b45309;">等待自动开启隐私屏，可在倒计时窗口取消本次遮屏</b>';
             } else {
                 box.style.background = '#f8fafc';
                 box.style.borderColor = '#e2e8f0';
@@ -2223,6 +2237,7 @@
 
                 if (cfg) {
                     document.getElementById('privacyTrigger').value = cfg.trigger || 'off';
+                    document.getElementById('privacyAutoCountdown').checked = !!cfg.auto_countdown;
                     document.getElementById('privacyBgColor').value = cfg.bg_color || '';
                     document.getElementById('privacyImage').value = cfg.image || '';
                     document.getElementById('privacyFit').value = cfg.fit || 'cover';
@@ -2253,9 +2268,12 @@
             const v = document.getElementById('privacyTrigger').value;
             const el = document.getElementById('privacyTriggerHelp');
             if (!el) return;
+            const countdown = document.getElementById('privacyAutoCountdown');
+            countdown.disabled = v !== 'auto';
             if (v === 'auto') {
-                el.innerHTML = '检测到远程会话时自动遮住本机。<b>注意语义是反的</b>：' +
-                    '若是非授权远程，遮罩反而替对方挡住了你的视线。';
+                el.textContent = countdown.checked
+                    ? '检测到远程会话后先显示 10 秒倒计时，未操作则开启隐私屏。取消本次遮屏会发送通知。'
+                    : '检测到远程会话后立即开启隐私屏，不显示倒计时。';
             } else if (v === 'manual') {
                 el.textContent = '只能手动开启，随时可关。';
             } else {
@@ -2266,6 +2284,7 @@
         function collectPrivacyConfig() {
             return {
                 trigger: document.getElementById('privacyTrigger').value,
+                auto_countdown: document.getElementById('privacyAutoCountdown').checked,
                 bg_color: document.getElementById('privacyBgColor').value.trim(),
                 image: document.getElementById('privacyImage').value.trim(),
                 fit: document.getElementById('privacyFit').value,
@@ -2339,6 +2358,9 @@
         document.addEventListener('DOMContentLoaded', () => {
             const t = document.getElementById('privacyTrigger');
             if (t) t.addEventListener('change', privacyTriggerHelp);
+            const countdown = document.getElementById('privacyAutoCountdown');
+            if (countdown) countdown.addEventListener('change', privacyTriggerHelp);
+            privacyTriggerHelp();
         });
 
         // 监控对象页：规则版本 + 工具列表 + 高级编辑器一起加载（切 tab 与顶部标签直达共用）

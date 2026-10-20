@@ -50,6 +50,14 @@ contextBridge.exposeInMainWorld('remoteAudit', {
     privacyGetConfig: () => ipcRenderer.invoke('privacyGetConfig'),
     privacySaveConfig: (config) => ipcRenderer.invoke('privacySaveConfig', config),
     privacyEnable: () => ipcRenderer.invoke('privacyEnable'),
+    privacyAutoGetState: () => ipcRenderer.invoke('privacyAutoGetState'),
+    privacyAutoCancel: () => ipcRenderer.invoke('privacyAutoCancel'),
+    onPrivacyAutoUpdate: (callback) => {
+        ipcRenderer.on('privacyAutoUpdate', (event, data) => callback(data));
+    },
+    onPrivacyAutoError: (callback) => {
+        ipcRenderer.on('privacyAutoError', (event, error) => callback(error));
+    },
     privacyDisable: (password) => ipcRenderer.invoke('privacyDisable', password),
     onPrivacyUpdate: (callback) => {
         ipcRenderer.on('privacyUpdate', (event, data) => callback(data));

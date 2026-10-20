@@ -435,25 +435,18 @@ func parseHotkey(s string) hotkey {
 	return hk
 }
 
-func (h hotkey) pressed(vk uint32) bool {
-	if vk != h.vk {
-		return false
-	}
+func asyncKeyDown(k uint32) bool {
+	s, _, _ := pGetAsyncKeyState.Call(uintptr(k))
+	return s&0x8000 != 0
+}
+
+func (h hotkey) modifiersMatch(down func(uint32) bool) bool {
 	const vkControl, vkMenu, vkShift = 0x11, 0x12, 0x10
-	down := func(k uintptr) bool {
-		s, _, _ := pGetAsyncKeyState.Call(k)
-		return s&0x8000 != 0
-	}
-	if h.ctrl != down(vkControl) {
-		return false
-	}
-	if h.alt != down(vkMenu) {
-		return false
-	}
-	if h.shift != down(vkShift) {
-		return false
-	}
-	return true
+	return h.ctrl == down(vkControl) && h.alt == down(vkMenu) && h.shift == down(vkShift)
+}
+
+func (h hotkey) pressed(down func(uint32) bool) bool {
+	return down(h.vk) && h.modifiersMatch(down)
 }
 
 // ---------- 引擎 ----------
@@ -491,9 +484,9 @@ func registerClass() (*uint16, error) {
 
 // 输入屏蔽用的低层钩子。回调必须是包级的，且要能读到当前热键配置。
 var (
-	hookMu       sync.Mutex
-	hookHotkey   hotkey
-	hookUnlockCh chan struct{}
+	hookHotkey hotkey
+	hookKeys   [256]bool
+	hookEngine *engine // 仅在消息泵所属线程安装/卸载钩子时变更
 )
 
 // ptrFromLParam 低层钩子的 lParam 是系统传来的有效指针，
@@ -506,30 +499,73 @@ func ptrFromLParam(lParam uintptr) unsafe.Pointer {
 func llKeyboardProc(nCode int32, wParam uintptr, lParam uintptr) uintptr {
 	if nCode >= 0 {
 		info := (*kbdllhookstruct)(ptrFromLParam(lParam))
-		hookMu.Lock()
-		hk := hookHotkey
-		ch := hookUnlockCh
-		hookMu.Unlock()
-		if hk.pressed(info.VkCode) && ch != nil {
-			select {
-			case ch <- struct{}{}:
-			default:
+		// 被吞掉的修饰键不会更新 GetAsyncKeyState，必须按钩子事件维护键态。
+		keyDown := wParam == 0x0100 || wParam == 0x0104
+		if info.VkCode < uint32(len(hookKeys)) {
+			hookKeys[info.VkCode] = keyDown
+			switch info.VkCode {
+			case 0xA2, 0xA3:
+				hookKeys[0x11] = false
+			case 0xA4, 0xA5:
+				hookKeys[0x12] = false
+			case 0xA0, 0xA1:
+				hookKeys[0x10] = false
 			}
 		}
-		// 吞掉本地键盘输入。Ctrl+Alt+Del 是系统保留组合键，
-		// 低层钩子拦不住，那也正是留给用户的逃生通道。
+		if keyDown && info.VkCode == hookHotkey.vk &&
+			hookHotkey.modifiersMatch(hookKeyDown) && hookEngine != nil {
+			hookEngine.markUnlockPending()
+		}
+		// 解锁框需要完整的键鼠输入；SendInput 注入的远端操作也应放行。
+		if hookEngine == nil || !blockHookInput(hookEngine.unlockPending(), info.Flags, 0x10) {
+			return nextHook(nCode, wParam, lParam)
+		}
+		// Ctrl+Alt+Del 属于安全桌面，低层钩子无法屏蔽，保留系统逃生通道。
 		return 1
 	}
+	return nextHook(nCode, wParam, lParam)
+}
+
+func hookKeyDown(key uint32) bool {
+	if key >= uint32(len(hookKeys)) {
+		return false
+	}
+	switch key {
+	case 0x11: // VK_CONTROL / VK_LCONTROL / VK_RCONTROL
+		return hookKeys[key] || hookKeys[0xA2] || hookKeys[0xA3]
+	case 0x12: // VK_MENU / VK_LMENU / VK_RMENU
+		return hookKeys[key] || hookKeys[0xA4] || hookKeys[0xA5]
+	case 0x10: // VK_SHIFT / VK_LSHIFT / VK_RSHIFT
+		return hookKeys[key] || hookKeys[0xA0] || hookKeys[0xA1]
+	}
+	return hookKeys[key]
+}
+
+func blockHookInput(unlocking bool, flags, injectedFlag uint32) bool {
+	return !unlocking && flags&injectedFlag == 0
+}
+
+func nextHook(nCode int32, wParam, lParam uintptr) uintptr {
 	r, _, _ := pCallNextHookEx.Call(0, uintptr(nCode), wParam, lParam)
 	return r
 }
 
+type msllhookstruct struct {
+	X, Y        int32
+	MouseData   uint32
+	Flags       uint32
+	Time        uint32
+	DwExtraInfo uintptr
+}
+
 func llMouseProc(nCode int32, wParam uintptr, lParam uintptr) uintptr {
-	if nCode >= 0 {
-		return 1
+	if nCode >= 0 && hookEngine != nil {
+		info := (*msllhookstruct)(ptrFromLParam(lParam))
+		if blockHookInput(hookEngine.unlockPending(), info.Flags, 0x01) {
+			return 1
+		}
 	}
-	r, _, _ := pCallNextHookEx.Call(0, uintptr(nCode), wParam, lParam)
-	return r
+	return nextHook(nCode, wParam, lParam)
 }
 
 type engine struct {
@@ -571,6 +607,7 @@ func (e *engine) start(o Options) error {
 		e.mu.Unlock()
 		return nil
 	}
+	e.clearUnlockPending()
 	e.stopCh = make(chan struct{})
 	e.doneCh = make(chan struct{})
 	done := e.doneCh
@@ -664,7 +701,30 @@ func (e *engine) run(o Options, ready chan<- error, stopCh, doneCh chan struct{}
 		return
 	}
 
-	// 自检通过之后才显示 —— 保证遮罩一帧都不会漏进远端画面
+	if o.BlockInput {
+		hookHotkey = parseHotkey(o.Hotkey)
+		for key := range hookKeys {
+			hookKeys[key] = asyncKeyDown(uint32(key))
+		}
+		hookEngine = e
+		defer func() { hookEngine = nil }()
+		kbHook, _, hookErr := pSetWindowsHookExW.Call(whKeyboardLL,
+			syscall.NewCallback(llKeyboardProc), 0, 0)
+		if kbHook == 0 {
+			ready <- fmt.Errorf("安装键盘钩子失败: %v", hookErr)
+			return
+		}
+		defer pUnhookWindowsHookEx.Call(kbHook)
+		msHook, _, hookErr := pSetWindowsHookExW.Call(whMouseLL,
+			syscall.NewCallback(llMouseProc), 0, 0)
+		if msHook == 0 {
+			ready <- fmt.Errorf("安装鼠标钩子失败: %v", hookErr)
+			return
+		}
+		defer pUnhookWindowsHookEx.Call(msHook)
+	}
+
+	// 自检与输入钩子都成功后才显示。
 	pShowWindow.Call(hwnd, swShowNoActivate)
 	pUpdateWindow.Call(hwnd)
 
@@ -676,38 +736,6 @@ func (e *engine) run(o Options, ready chan<- error, stopCh, doneCh chan struct{}
 	if o.HideCursor {
 		hideCursors()
 		defer restoreCursors()
-	}
-
-	var kbHook, msHook uintptr
-	if o.BlockInput {
-		unlockCh := make(chan struct{}, 1)
-		hookMu.Lock()
-		hookHotkey = parseHotkey(o.Hotkey)
-		hookUnlockCh = unlockCh
-		hookMu.Unlock()
-
-		kbHook, _, _ = pSetWindowsHookExW.Call(whKeyboardLL,
-			syscall.NewCallback(llKeyboardProc), 0, 0)
-		msHook, _, _ = pSetWindowsHookExW.Call(whMouseLL,
-			syscall.NewCallback(llMouseProc), 0, 0)
-
-		go func() {
-			for range unlockCh {
-				e.markUnlockPending()
-			}
-		}()
-		defer func() {
-			if kbHook != 0 {
-				pUnhookWindowsHookEx.Call(kbHook)
-			}
-			if msHook != 0 {
-				pUnhookWindowsHookEx.Call(msHook)
-			}
-			hookMu.Lock()
-			hookUnlockCh = nil
-			hookMu.Unlock()
-			close(unlockCh)
-		}()
 	}
 
 	hk := parseHotkey(o.Hotkey)
@@ -857,7 +885,7 @@ func (e *engine) loop(hwnd uintptr, bg *dib, font uintptr, fg uint32, hk hotkey,
 		}
 
 		// 没开输入屏蔽时，热键靠轮询检测（开了的话由低层钩子上报）
-		if !o.BlockInput && hk.pressed(hk.vk) {
+		if !o.BlockInput && hk.pressed(asyncKeyDown) {
 			e.markUnlockPending()
 		}
 

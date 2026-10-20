@@ -96,6 +96,7 @@ func (s *Server) Start() error {
 	http.HandleFunc("/api/privacy/status", s.handlePrivacyStatus)
 	http.HandleFunc("/api/privacy/config", s.handlePrivacyConfig)
 	http.HandleFunc("/api/privacy/enable", s.handlePrivacyEnable)
+	http.HandleFunc("/api/privacy/auto", s.handlePrivacyAuto)
 	http.HandleFunc("/api/privacy/disable", s.handlePrivacyDisable)
 	http.HandleFunc("/api/privacy/unlock-ack", s.handlePrivacyUnlockAck)
 	http.HandleFunc("/api/security/state", s.handleSecurityState)

@@ -3,6 +3,8 @@ const { spawn, spawnSync } = require('child_process');
 const path = require('path');
 const http = require('http');
 const fs = require('fs');
+const { createPrivacyPrompt } = require('./privacy-prompt');
+let privacyPrompt = null;
 
 // 正式版与 package.json build.appId 一致；开发版独立分组，避免复用已安装版的旧图标缓存。
 const APP_USER_MODEL_ID = app.isPackaged ? 'com.remoteknown.app' : 'com.remoteknown.app.dev';
@@ -101,6 +103,7 @@ if (!gotTheLock) {
         createTray();
         startBackend();
         setupIPC();
+        privacyPrompt = createPrivacyPrompt({ BrowserWindow, ipcMain, post: fetchAPIPost });
 
         // 先问一次安全状态，决定启动时要不要显示主窗口。
         // 兜底：4 秒内后端还没答复就照常显示，免得界面永远出不来。
@@ -200,6 +203,7 @@ if (!gotTheLock) {
                     const pv = await fetchAPI('/api/privacy/status');
                     if (pv) {
                         mainWindow.webContents.send('privacyUpdate', pv);
+                        privacyPrompt.sync(pv);
                         if (pv.unlock_pending) {
                             const cfg = await fetchAPI('/api/privacy/config');
                             handlePrivacyUnlockRequest(cfg);
@@ -530,15 +534,16 @@ function activateUnlockWindow() {
 async function requireUnlock(action) {
     // 启动最初几秒还没拿到安全状态，先补一次，别让人趁这个空档溜过去
     if (!securityStateLoaded) await refreshSecurityState();
-    if (!isGated()) return true;
+    const needsPassword = action === 'privacy' ? securityState.enabled : isGated();
+    if (!needsPassword) return true;
 
     // 已经开着一个解锁窗就聚焦它，不重复弹
     if (unlockWindow && !unlockWindow.isDestroyed()) {
         activateUnlockWindow();
-        return false;
+        return unlockPending ? unlockPending.promise : false;
     }
 
-    return new Promise((resolve) => {
+    const result = new Promise((resolve) => {
         unlockPending = { resolve };
 
         unlockWindow = new BrowserWindow({
@@ -584,6 +589,8 @@ async function requireUnlock(action) {
             }
         });
     });
+    unlockPending.promise = result;
+    return result;
 }
 
 // privacyDisable 撤除遮罩。
@@ -604,7 +611,9 @@ async function handlePrivacyUnlockRequest(cfg) {
     if (privacyUnlocking) return;
     privacyUnlocking = true;
     try {
-        const needPw = cfg && cfg.require_password && isGated();
+        // 隐私屏的密码要求独立于“托盘操作需要密码”，以最新后端状态为准。
+        await refreshSecurityState();
+        const needPw = cfg && cfg.require_password && securityState.enabled;
         if (!needPw) {
             await privacyDisable('');
             return;
@@ -618,6 +627,8 @@ async function handlePrivacyUnlockRequest(cfg) {
         }
     } catch (e) {
         console.error('隐私屏解锁失败:', e);
+        await fetchAPIPost('/api/privacy/unlock-ack', {}).catch(() => {});
+        dialog.showErrorBox('隐私屏解锁失败', `${e.message}\n请再次按解锁快捷键重试。`);
     } finally {
         privacyUnlocking = false;
     }

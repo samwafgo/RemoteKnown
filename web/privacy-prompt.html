@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; script-src 'self' 'unsafe-inline'">
+    <title>隐私屏开启提醒</title>
+    <style>
+        * { box-sizing: border-box; }
+        body { margin: 0; background: #fbfbfc; color: #243447; font: 14px 'Microsoft YaHei', sans-serif; }
+        main { padding: 28px 30px; }
+        h1 { margin: 0 0 14px; font-size: 20px; }
+        p { margin: 10px 0; line-height: 1.7; color: #536477; }
+        .countdown { font-size: 16px; color: #243447; }
+        #seconds { font-size: 26px; font-weight: bold; color: #2563eb; font-variant-numeric: tabular-nums; }
+        button { width: 100%; margin-top: 12px; padding: 12px; border: 0; border-radius: 6px; background: #2563eb; color: white; font: inherit; cursor: pointer; }
+        button:focus-visible { outline: 3px solid #93c5fd; outline-offset: 3px; }
+        button:disabled { opacity: .6; cursor: wait; }
+        #error { min-height: 20px; margin-top: 8px; color: #b42318; font-size: 12px; }
+    </style>
+</head>
+<body>
+    <main>
+        <h1>即将开启本机隐私屏</h1>
+        <p>你已开启倒计时提醒。如果是你正在控制其他电脑，可以取消本次遮屏。检测和会话通知照常，取消操作也会发送到已启用的通知渠道。</p>
+        <p class="countdown"><span id="seconds">10</span> 秒后自动开启隐私屏</p>
+        <button id="cancel" type="button" autofocus>本次不开启</button>
+        <div id="error" role="alert"></div>
+    </main>
+    <script>
+        let state = null;
+        const button = document.getElementById('cancel');
+        function render() {
+            if (!state) return;
+            const seconds = Math.max(0, Math.ceil((Date.parse(state.deadline) - Date.now()) / 1000));
+            document.getElementById('seconds').textContent = seconds;
+        }
+        function update(value) { state = value; render(); }
+        async function cancel() {
+            if (button.disabled) return;
+            button.disabled = true;
+            try {
+                const result = await window.remoteAudit.privacyAutoCancel();
+                if (!result.success) document.getElementById('error').textContent = result.error;
+            } catch (e) {
+                document.getElementById('error').textContent = e.message;
+            } finally {
+                button.disabled = false;
+            }
+        }
+        button.addEventListener('click', cancel);
+        document.addEventListener('keydown', event => {
+            if (event.key === 'Escape') { event.preventDefault(); cancel(); }
+        });
+        window.remoteAudit.onPrivacyAutoUpdate(update);
+        window.remoteAudit.onPrivacyAutoError(error => {
+            document.getElementById('error').textContent = error;
+        });
+        window.remoteAudit.privacyAutoGetState().then(update);
+        setInterval(render, 100);
+    </script>
+</body>
+</html>

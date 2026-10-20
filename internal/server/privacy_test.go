@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"RemoteKnown/internal/privacyscreen"
 	"RemoteKnown/internal/security"
@@ -35,6 +36,7 @@ func newPrivacyServer(t *testing.T, withPassword bool) (*Server, *fakeAlerter) {
 
 	srv := NewServer(nil, store, nil, sec)
 	srv.SetPrivacy(privacyscreen.NewManager(store, alerter))
+	t.Cleanup(srv.privacy.Shutdown)
 	return srv, alerter
 }
 
@@ -65,6 +67,9 @@ func TestPrivacyDefaultTriggerIsOff(t *testing.T) {
 	if body["trigger"] != privacyscreen.TriggerOff {
 		t.Errorf("默认触发方式 = %v, 期望 %q", body["trigger"], privacyscreen.TriggerOff)
 	}
+	if body["auto_countdown"] != false {
+		t.Errorf("倒计时默认应为关闭，实际 %v", body["auto_countdown"])
+	}
 	if body["lock_on_end"] != false {
 		t.Errorf("默认 lock_on_end = %v, 期望 false（必须用户主动勾选）", body["lock_on_end"])
 	}
@@ -87,7 +92,7 @@ func TestPrivacyEnableRejectedWhenTriggerOff(t *testing.T) {
 func TestPrivacyConfigRoundTrip(t *testing.T) {
 	srv, _ := newPrivacyServer(t, false)
 
-	in := `{"trigger":"manual","bg_color":"#0B3D91","fg_color":"#FFFFFF",
+	in := `{"trigger":"manual","auto_countdown":true,"bg_color":"#0B3D91","fg_color":"#FFFFFF",
 	        "font_size":56,"bold":true,"hotkey":"Ctrl+Alt+P",
 	        "max_minutes":15,"lock_on_end":true,"fit":"contain"}`
 	code, _ := doJSON(t, srv.handlePrivacyConfig, http.MethodPost, in, nil)
@@ -100,12 +105,13 @@ func TestPrivacyConfigRoundTrip(t *testing.T) {
 		t.Fatalf("读配置状态码 = %d, 期望 200", code)
 	}
 	checks := map[string]interface{}{
-		"trigger":     "manual",
-		"bg_color":    "#0B3D91",
-		"font_size":   float64(56),
-		"max_minutes": float64(15),
-		"lock_on_end": true,
-		"fit":         "contain",
+		"trigger":        "manual",
+		"auto_countdown": true,
+		"bg_color":       "#0B3D91",
+		"font_size":      float64(56),
+		"max_minutes":    float64(15),
+		"lock_on_end":    true,
+		"fit":            "contain",
 	}
 	for k, want := range checks {
 		if body[k] != want {
@@ -187,6 +193,76 @@ func TestPrivacyDisableChecksPassword(t *testing.T) {
 		map[string]string{unlockTokenHeader: token})
 	if code != http.StatusOK {
 		t.Errorf("带令牌撤除状态码 = %d, 期望 200", code)
+	}
+}
+
+func TestPrivacyAutoShownAndCancelWithoutPassword(t *testing.T) {
+	srv, _ := newPrivacyServer(t, true)
+	o := privacyscreen.DefaultOptions()
+	o.Trigger = privacyscreen.TriggerAuto
+	o.AutoCountdown = true
+	if err := srv.privacy.SaveOptions(o); err != nil {
+		t.Fatal(err)
+	}
+	srv.privacy.OnRemoteStart()
+	st := srv.privacy.Status()
+	if !st.AutoPending || st.AutoRequestID == "" {
+		t.Fatalf("缺少待处理请求: %+v", st)
+	}
+	if _, err := time.Parse(time.RFC3339Nano, st.AutoDeadline); err != nil {
+		t.Fatalf("deadline 格式错误: %v", err)
+	}
+	request := func(id, action string) (int, map[string]interface{}) {
+		t.Helper()
+		body, _ := json.Marshal(map[string]string{"request_id": id, "action": action})
+		return doJSON(t, srv.handlePrivacyAuto, http.MethodPost, string(body), nil)
+	}
+	if code, _ := request("old", "cancel"); code != http.StatusConflict {
+		t.Fatalf("旧请求状态码 = %d", code)
+	}
+	code, body := request(st.AutoRequestID, "shown")
+	if code != http.StatusOK || body["success"] != true {
+		t.Fatalf("shown 失败: %d %v", code, body)
+	}
+	status, ok := body["status"].(map[string]interface{})
+	if !ok || status["auto_pending"] != true || status["auto_request_id"] != st.AutoRequestID {
+		t.Fatalf("shown 未返回当前状态: %v", body)
+	}
+	deadline := status["auto_deadline"]
+	code, body = request(st.AutoRequestID, "shown")
+	if code != http.StatusOK || body["status"].(map[string]interface{})["auto_deadline"] != deadline {
+		t.Fatalf("重复 shown 改变倒计时: %d %v", code, body)
+	}
+	code, body = request(st.AutoRequestID, "cancel")
+	if code != http.StatusOK || body["success"] != true || body["status"].(map[string]interface{})["auto_pending"] != false {
+		t.Fatalf("无密码 cancel 失败: %d %v", code, body)
+	}
+	if code, _ := request(st.AutoRequestID, "cancel"); code != http.StatusConflict {
+		t.Fatalf("已取消请求状态码 = %d", code)
+	}
+	srv.privacy.OnRemoteStart()
+	if srv.privacy.Status().AutoPending {
+		t.Fatal("同会话取消后再次提示")
+	}
+	srv.privacy.OnRemoteEnd()
+	srv.privacy.OnRemoteStart()
+	if code, _ := request(st.AutoRequestID, "shown"); code != http.StatusConflict {
+		t.Fatalf("上一会话请求状态码 = %d", code)
+	}
+}
+
+func TestPrivacyAutoValidation(t *testing.T) {
+	srv, _ := newPrivacyServer(t, false)
+	if code, _ := doJSON(t, srv.handlePrivacyAuto, http.MethodGet, "", nil); code != http.StatusMethodNotAllowed {
+		t.Fatalf("GET 状态码 = %d", code)
+	}
+	for _, body := range []string{`{}`, `{"request_id":"id","action":"enable"}`, `{"action":"cancel"}`, `{`} {
+		if code, _ := doJSON(t, srv.handlePrivacyAuto, http.MethodPost, body, nil); code != http.StatusBadRequest {
+			t.Errorf("无效请求 %s 状态码 = %d", body, code)
+		}
+	}
+	if code, _ := doJSON(t, (&Server{}).handlePrivacyAuto, http.MethodPost, `{}`, nil); code != http.StatusServiceUnavailable {
+		t.Fatalf("未装配模块状态码 = %d", code)
 	}
 }
 

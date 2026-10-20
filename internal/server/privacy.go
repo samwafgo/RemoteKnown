@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"net/http"
 
 	"RemoteKnown/internal/privacyscreen"
@@ -84,6 +85,40 @@ func (s *Server) handlePrivacyEnable(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.privacy.Enable("手动开启"); err != nil {
 		writeSecErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"status":  s.privacy.Status(),
+	})
+}
+
+// handlePrivacyAuto 确认提示窗口已显示，或仅取消本次自动遮罩。
+func (s *Server) handlePrivacyAuto(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.privacyReady(w) {
+		return
+	}
+	var req struct {
+		RequestID string `json:"request_id"`
+		Action    string `json:"action"`
+	}
+	if !decodeBody(w, r, &req) {
+		return
+	}
+	if req.RequestID == "" || (req.Action != "shown" && req.Action != "cancel") {
+		writeSecErr(w, http.StatusBadRequest, "请提供 request_id 和有效的 action（shown/cancel）")
+		return
+	}
+	if err := s.privacy.AutoAction(req.RequestID, req.Action); err != nil {
+		code := http.StatusBadRequest
+		if errors.Is(err, privacyscreen.ErrAutoRequestExpired) {
+			code = http.StatusConflict
+		}
+		writeSecErr(w, code, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{

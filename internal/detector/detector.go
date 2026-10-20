@@ -277,7 +277,8 @@ func (d *Detector) handleRemoteStart(signals []Signal) {
 	}
 
 	if d.OnRemoteStart != nil {
-		go d.OnRemoteStart()
+		// 保持开始/结束的回调顺序，避免上一会话的延迟回调影响下一次倒计时。
+		d.OnRemoteStart()
 	}
 }
 
@@ -330,7 +331,7 @@ func (d *Detector) handleRemoteEnd() {
 	}
 
 	if d.OnRemoteEnd != nil {
-		go d.OnRemoteEnd()
+		d.OnRemoteEnd()
 	}
 }
 

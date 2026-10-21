@@ -32,6 +32,7 @@ const (
 	keyTrigger       = "privacy_trigger"
 	keyBgColor       = "privacy_bg_color"
 	keyImage         = "privacy_image"
+	keyImagePreset   = "privacy_image_preset"
 	keyFit           = "privacy_fit"
 	keyShowText      = "privacy_show_text"
 	keyText          = "privacy_text"
@@ -55,15 +56,16 @@ type Options struct {
 	AutoCountdown bool   `json:"auto_countdown"` // 自动开启前显示 10 秒倒计时，默认关闭
 
 	// 外观
-	BgColor  string `json:"bg_color"`  // #RRGGBB
-	Image    string `json:"image"`     // 背景图片路径，空则纯色
-	Fit      string `json:"fit"`       // cover / contain / stretch / center / tile
-	ShowText bool   `json:"show_text"` //
-	Text     string `json:"text"`      // {s} 替换成剩余秒数
-	Font     string `json:"font"`      //
-	FontSize int    `json:"font_size"` // 像素高
-	Bold     bool   `json:"bold"`      //
-	FgColor  string `json:"fg_color"`  // #RRGGBB
+	BgColor     string `json:"bg_color"`     // #RRGGBB
+	Image       string `json:"image"`        // 用户自选背景图路径，空则用内置图或纯色
+	ImagePreset string `json:"image_preset"` // 内置背景图标识，空表示不用内置图
+	Fit         string `json:"fit"`          // cover / contain / stretch / center / tile
+	ShowText    bool   `json:"show_text"`    //
+	Text        string `json:"text"`         // {s} 替换成剩余秒数
+	Font        string `json:"font"`         //
+	FontSize    int    `json:"font_size"`    // 像素高
+	Bold        bool   `json:"bold"`         //
+	FgColor     string `json:"fg_color"`     // #RRGGBB
 
 	// 行为
 	HideCursor bool `json:"hide_cursor"` // 光标不受窗口合成管辖，不藏会暴露远端操作轨迹
@@ -83,6 +85,7 @@ func DefaultOptions() Options {
 		Trigger:         TriggerOff,
 		AutoCountdown:   false,
 		BgColor:         "#0A2A43",
+		ImagePreset:     "aurora",
 		Fit:             "cover",
 		ShowText:        true,
 		Text:            "本机已开启隐私屏 · 按 {hotkey} 解锁",
@@ -205,11 +208,12 @@ func (m *Manager) getInt(key string, def int) int {
 // Options 读取当前配置，缺失项用默认值补齐
 func (m *Manager) Options() Options {
 	d := DefaultOptions()
-	return Options{
+	o := Options{
 		Trigger:         m.getStr(keyTrigger, d.Trigger),
 		AutoCountdown:   m.getBool(keyAutoCountdown, d.AutoCountdown),
 		BgColor:         m.getStr(keyBgColor, d.BgColor),
 		Image:           m.getStr(keyImage, d.Image),
+		ImagePreset:     m.getStr(keyImagePreset, d.ImagePreset),
 		Fit:             m.getStr(keyFit, d.Fit),
 		ShowText:        m.getBool(keyShowText, d.ShowText),
 		Text:            m.getStr(keyText, d.Text),
@@ -225,6 +229,12 @@ func (m *Manager) Options() Options {
 		DropOnEnd:       m.getBool(keyDropOnEnd, d.DropOnEnd),
 		LockOnEnd:       m.getBool(keyLockOnEnd, d.LockOnEnd),
 	}
+	// 存进去的互斥关系读出来再补一遍：选了自定义图片时 preset 落库是空串，
+	// 而 getStr 把空串当缺失回默认，不拦一下自定义图片就永远甩不掉内置图。
+	if o.Image != "" {
+		o.ImagePreset = ""
+	}
+	return o
 }
 
 // SaveOptions 写入配置，写前做一遍取值校正
@@ -239,6 +249,7 @@ func (m *Manager) SaveOptions(o Options) error {
 		{keyAutoCountdown, boolStr(o.AutoCountdown)},
 		{keyBgColor, o.BgColor},
 		{keyImage, o.Image},
+		{keyImagePreset, o.ImagePreset},
 		{keyFit, o.Fit},
 		{keyShowText, boolStr(o.ShowText)},
 		{keyText, o.Text},
@@ -302,6 +313,13 @@ func sanitize(o Options) Options {
 	}
 	if o.Hotkey == "" {
 		o.Hotkey = "Ctrl+Alt+P"
+	}
+	// 选了自己指定的图片就不再看内置图，两者互斥。
+	// "none" 是用户明确选的纯色，保留；其余非法值回退默认内置图。
+	if o.Image != "" {
+		o.ImagePreset = ""
+	} else if o.ImagePreset != "none" && !IsBuiltinPreset(o.ImagePreset) {
+		o.ImagePreset = DefaultOptions().ImagePreset
 	}
 	return o
 }

@@ -6,6 +6,68 @@ const fs = require('fs');
 const { createPrivacyPrompt } = require('./privacy-prompt');
 let privacyPrompt = null;
 
+// ---- 自定义确认框 ----
+// 系统原生 MessageBox 会把「取消 / 确认」渲染成蓝色下划线文字，
+// 看着像链接而不是按钮，误点代价又高（退出 = 停止监控），
+// 所以自己画一个：图标 + 文字的实体按钮，主次分明。
+let confirmWindow = null;
+let confirmResolve = null;
+
+const CONFIRM_WINDOW_WIDTH = 430;
+const CONFIRM_WINDOW_HEIGHT = 210;
+
+// showConfirmDialog 弹出自绘确认框，返回 true 表示点了确认。
+function showConfirmDialog(opts) {
+    return new Promise((resolve) => {
+        if (confirmWindow && !confirmWindow.isDestroyed()) {
+            confirmWindow.close();
+        }
+        confirmResolve = resolve;
+
+        confirmWindow = new BrowserWindow({
+            width: opts.width || CONFIRM_WINDOW_WIDTH,
+            height: opts.height || CONFIRM_WINDOW_HEIGHT,
+            frame: false,
+            resizable: false,
+            minimizable: false,
+            maximizable: false,
+            fullscreenable: false,
+            alwaysOnTop: true,
+            skipTaskbar: true,
+            show: false,
+            backgroundColor: '#fbfbfc',
+            webPreferences: {
+                nodeIntegration: false,
+                contextIsolation: true,
+                preload: path.join(__dirname, 'preload.js')
+            }
+        });
+
+        confirmWindow.loadFile('confirm.html', {
+            query: {
+                title: opts.title || '确认',
+                message: opts.message || '',
+                detail: opts.detail || '',
+                confirmText: opts.confirmText || '确定',
+                cancelText: opts.cancelText || '取消',
+                icon: opts.icon || 'warn'
+            }
+        });
+        confirmWindow.once('ready-to-show', () => {
+            confirmWindow.show();
+            confirmWindow.focus();
+        });
+
+        // 直接关掉窗口 = 取消
+        confirmWindow.on('closed', () => {
+            confirmWindow = null;
+            const r = confirmResolve;
+            confirmResolve = null;
+            if (r) r(false);
+        });
+    });
+}
+
 // 正式版与 package.json build.appId 一致；开发版独立分组，避免复用已安装版的旧图标缓存。
 const APP_USER_MODEL_ID = app.isPackaged ? 'com.remoteknown.app' : 'com.remoteknown.app.dev';
 app.setAppUserModelId(APP_USER_MODEL_ID);
@@ -613,7 +675,9 @@ async function handlePrivacyUnlockRequest(cfg) {
     try {
         // 隐私屏的密码要求独立于“托盘操作需要密码”，以最新后端状态为准。
         await refreshSecurityState();
-        const needPw = cfg && cfg.require_password && securityState.enabled;
+        // 读配置接口新版返回 {options, presets}，旧版直接是配置项，两边都兼容
+        const opt = cfg && cfg.options ? cfg.options : cfg;
+        const needPw = opt && opt.require_password && securityState.enabled;
         if (!needPw) {
             await privacyDisable('');
             return;
@@ -729,11 +793,11 @@ function createTray() {
                 try {
                     const status = await fetchAPI('/api/status');
                     if (status && mainWindow) {
-                        const { dialog } = require('electron');
                         const msg = status.remote_active
                             ? `远程控制进行中\n开始时间: ${status.start_time}`
                             : '未检测到远程控制';
-                        dialog.showMessageBox({
+                        // 带上父窗口，避免弹到主窗口后面看不见
+                        dialog.showMessageBox(mainWindow, {
                             type: 'info',
                             title: '远程状态',
                             message: msg
@@ -742,8 +806,7 @@ function createTray() {
                 } catch (error) {
                     console.error('获取状态失败:', error);
                     if (mainWindow) {
-                        const { dialog } = require('electron');
-                        dialog.showMessageBox({
+                        dialog.showMessageBox(mainWindow, {
                             type: 'error',
                             title: '错误',
                             message: '无法获取远程状态: ' + error.message
@@ -756,19 +819,17 @@ function createTray() {
         {
             label: '退出', click: async () => {
                 if (!await requireUnlock('quit')) return;
-                // 明说退出的后果：本机不再被监控，并且会往手机推一条提醒
-                if (isGated()) {
-                    const { response } = await dialog.showMessageBox({
-                        type: 'warning',
-                        buttons: ['取消', '确认退出'],
-                        defaultId: 0,
-                        cancelId: 0,
-                        title: '远程知道了',
-                        message: '确认退出？',
-                        detail: '退出后本机将不再被监控，并会向你配置的通知渠道发送一条退出提醒。'
-                    });
-                    if (response !== 1) return;
-                }
+                // 明说退出的后果：本机不再被监控，并且会往手机推一条提醒。
+                // 退出是不可逆的动作（停了监控），所以一律弹确认框，不看有没有设密码。
+                const ok = await showConfirmDialog({
+                    title: '确认退出',
+                    message: '确认退出「远程知道了」？',
+                    detail: '退出后本机将不再被监控，并会向你配置的通知渠道发送一条退出提醒。',
+                    confirmText: '确认退出',
+                    cancelText: '取消',
+                    icon: 'exit'
+                });
+                if (!ok) return;
                 isQuitting = true;
                 app.quit();
             }
@@ -833,6 +894,17 @@ function updateTray(status) {
 }
 
 function setupIPC() {
+    // 自绘确认框回传结果。ipcMain.handle 同一通道只能注册一次，
+    // 所以这个处理函数常驻，靠 confirmWindow 认领当前这次弹窗。
+    ipcMain.handle('confirmReply', (event, ok) => {
+        if (!confirmWindow || confirmWindow.isDestroyed()) return;
+        if (event.sender !== confirmWindow.webContents) return;
+        const r = confirmResolve;
+        confirmResolve = null;
+        confirmWindow.close();
+        if (r) r(!!ok);
+    });
+
     ipcMain.handle('getStatus', async () => {
         return await fetchAPI('/api/status');
     });
@@ -985,6 +1057,25 @@ function setupIPC() {
 
     ipcMain.handle('privacyGetConfig', async () => {
         return await fetchAPI('/api/privacy/config');
+    });
+
+    // 弹出系统文件选择框挑背景图，返回选中的路径；取消返回 null。
+    // 必须传父窗口：不传的话 Windows 会把选择框弹到主窗口后面去，
+    // 用户看着像"点了没反应"，选择框还压不住设置弹窗。
+    ipcMain.handle('privacyPickImage', async (event) => {
+        const parent = BrowserWindow.fromWebContents(event.sender) || mainWindow;
+        const result = await dialog.showOpenDialog(parent, {
+            title: '选择隐私屏背景图片',
+            properties: ['openFile'],
+            filters: [
+                { name: '图片', extensions: ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'] },
+                { name: '所有文件', extensions: ['*'] }
+            ]
+        });
+        if (result.canceled || !result.filePaths.length) {
+            return null;
+        }
+        return result.filePaths[0];
     });
 
     // 这三个接口在被拒时会返回 4xx，fetchAPIPost 会因此 reject。

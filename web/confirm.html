@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <!-- 确认框不需要任何外部资源，除内联脚本/样式外全部禁掉 -->
+    <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'">
+    <title>确认</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+            font-size: 12.5px;
+            color: #1b2026;
+            background: #fbfbfc;
+            border: 1px solid #c9ced5;
+            border-radius: 7px;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        .bar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            height: 32px;
+            padding: 0 4px 0 11px;
+            background: #f1f3f6;
+            border-bottom: 1px solid #dee2e7;
+            font-size: 12px;
+            font-weight: 500;
+            -webkit-app-region: drag;
+        }
+
+        .bar .grow {
+            flex: 1;
+        }
+
+        /* 标题栏图标：用内联 SVG，emoji 在 Segoe UI 下会变成方框 */
+        .bar .barIcon {
+            display: grid;
+            place-items: center;
+            color: #c8811a;
+        }
+
+        .bar .barIcon.danger {
+            color: #d0353c;
+        }
+
+        .bar .x {
+            width: 32px;
+            height: 26px;
+            display: grid;
+            place-items: center;
+            border-radius: 4px;
+            cursor: pointer;
+            color: #5a646f;
+            -webkit-app-region: no-drag;
+        }
+
+        .bar .x:hover {
+            background: #e4262c;
+            color: #fff;
+        }
+
+        .body {
+            display: flex;
+            flex-direction: column;
+            height: calc(100vh - 33px);
+            padding: 16px 18px 16px;
+        }
+
+        .hero {
+            display: flex;
+            align-items: flex-start;
+            gap: 13px;
+        }
+
+        /* 大图标：一眼看到这是个警告，不是普通提示 */
+        .heroIcon {
+            flex: none;
+            width: 46px;
+            height: 46px;
+            border-radius: 50%;
+            display: grid;
+            place-items: center;
+            background: #fdf1d8;
+            border: 1px solid #f0d9a6;
+            color: #c8811a;
+        }
+
+        .heroIcon.danger {
+            background: #fdeaea;
+            border-color: #f2c4c4;
+            color: #d0353c;
+        }
+
+        .heroText {
+            min-width: 0;
+            padding-top: 2px;
+        }
+
+        h1 {
+            font-size: 15px;
+            font-weight: 600;
+            margin: 0 0 5px;
+            line-height: 1.35;
+        }
+
+        .sub {
+            margin: 0;
+            color: #5a646f;
+            font-size: 12px;
+            line-height: 1.6;
+        }
+
+        .foot {
+            display: flex;
+            justify-content: flex-end;
+            gap: 9px;
+            margin-top: auto;
+            padding-top: 16px;
+        }
+
+        /* 按钮是实打实的按钮：图标 + 文字，一眼分得清主次 */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            font: inherit;
+            font-size: 12.5px;
+            font-weight: 500;
+            height: 32px;
+            padding: 0 15px;
+            border-radius: 5px;
+            cursor: pointer;
+            border: 1px solid #dee2e7;
+            background: #fff;
+            color: #1b2026;
+        }
+
+        .btn svg {
+            flex: none;
+        }
+
+        .btn.ghost:hover {
+            background: #eef1f5;
+        }
+
+        .btn.danger {
+            background: #d0353c;
+            border-color: #c22c33;
+            color: #fff;
+        }
+
+        .btn.danger:hover {
+            background: #bb2b31;
+        }
+
+        .btn:focus {
+            outline: 2px solid #2563c9;
+            outline-offset: 1px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="bar"><span class="barIcon" id="barIcon"></span><span class="barTitle" id="barTitle">确认</span>
+        <span class="grow"></span>
+        <span class="x" id="btnClose">✕</span>
+    </div>
+    <div class="body">
+        <div class="hero">
+            <div class="heroIcon" id="heroIcon"></div>
+            <div class="heroText">
+                <h1 id="msg"></h1>
+                <p class="sub" id="detail"></p>
+            </div>
+        </div>
+        <div class="foot">
+            <button class="btn ghost" id="cancel" type="button"></button>
+            <button class="btn danger" id="ok" type="button"></button>
+        </div>
+    </div>
+
+    <script>
+        const api = window.remoteAudit;
+        const params = new URLSearchParams(location.search);
+
+        const ICONS = {
+            warn: '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.6 2.8 20h18.4L12 3.6z"/><path d="M12 9.8v4.4"/><circle cx="12" cy="17" r="1" fill="currentColor" stroke="none"/></svg>',
+            exit: '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.2v7.4"/><path d="M6.6 6.6a8 8 0 1 0 10.8 0"/></svg>'
+        };
+
+        // 标题栏里的小号版本
+        const BAR_ICONS = {
+            warn: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.6 2.8 20h18.4L12 3.6z"/><path d="M12 9.8v4.4"/><circle cx="12" cy="17" r="1" fill="currentColor" stroke="none"/></svg>',
+            exit: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.2v7.4"/><path d="M6.6 6.6a8 8 0 1 0 10.8 0"/></svg>'
+        };
+
+        const BTN = {
+            cancel: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+            ok: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.2v7.4"/><path d="M6.6 6.6a8 8 0 1 0 10.8 0"/></svg>'
+        };
+
+        const title = params.get('title') || '确认';
+        const message = params.get('message') || '';
+        const detail = params.get('detail') || '';
+        const icon = params.get('icon') || 'warn';
+
+        document.getElementById('barTitle').textContent = title;
+        const barIcon = document.getElementById('barIcon');
+        barIcon.innerHTML = icon === 'exit' ? BAR_ICONS.exit : BAR_ICONS.warn;
+        if (icon === 'exit') barIcon.classList.add('danger');
+        document.getElementById('msg').textContent = message;
+        document.getElementById('detail').textContent = detail;
+        document.getElementById('heroIcon').innerHTML = ICONS[icon] || ICONS.warn;
+        if (icon === 'exit') document.getElementById('heroIcon').classList.add('danger');
+
+        const cancelBtn = document.getElementById('cancel');
+        const okBtn = document.getElementById('ok');
+        cancelBtn.innerHTML = BTN.cancel + '<span>' + (params.get('cancelText') || '取消') + '</span>';
+        okBtn.innerHTML = BTN.ok + '<span>' + (params.get('confirmText') || '确定') + '</span>';
+
+        cancelBtn.onclick = () => api.confirmReply(false);
+        okBtn.onclick = () => api.confirmReply(true);
+        document.getElementById('btnClose').onclick = () => api.confirmReply(false);
+
+        // Esc = 取消，Enter = 确认
+        document.addEventListener('keydown', e => {
+            if (e.key === 'Escape') api.confirmReply(false);
+            else if (e.key === 'Enter') api.confirmReply(true);
+        });
+
+        // 打开就把焦点放在「取消」上，回车不会误退出
+        window.addEventListener('focus', () => cancelBtn.focus());
+    </script>
+</body>
+
+</html>

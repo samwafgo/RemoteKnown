@@ -169,6 +169,45 @@ func TestAutoCountdownDefaultsOffAndPersists(t *testing.T) {
 	}
 }
 
+// 背景图三态：自定义图片与内置图互斥；明确选纯色（none）要保留；
+// 非法内置图标识回退默认。
+func TestImagePresetMutualExclusionAndNone(t *testing.T) {
+	m, _ := newTestManager(t)
+
+	if !IsBuiltinPreset(DefaultOptions().ImagePreset) {
+		t.Fatal("默认配置应带合法内置图")
+	}
+
+	o := DefaultOptions()
+	o.Image = `C:\pic\a.png`
+	o.ImagePreset = "teal"
+	if err := m.SaveOptions(o); err != nil {
+		t.Fatal(err)
+	}
+	if got := m.Options(); got.ImagePreset != "" {
+		t.Fatalf("选了自定义图片后内置图应清空，实际 %q", got.ImagePreset)
+	}
+
+	o = DefaultOptions()
+	o.Image = ""
+	o.ImagePreset = "none"
+	if err := m.SaveOptions(o); err != nil {
+		t.Fatal(err)
+	}
+	if got := m.Options(); got.ImagePreset != "none" {
+		t.Fatalf("纯色选项应保留，实际 %q", got.ImagePreset)
+	}
+
+	o = DefaultOptions()
+	o.ImagePreset = "not-a-preset"
+	if err := m.SaveOptions(o); err != nil {
+		t.Fatal(err)
+	}
+	if got := m.Options(); got.ImagePreset != DefaultOptions().ImagePreset {
+		t.Fatalf("非法内置图标识应回退默认，实际 %q", got.ImagePreset)
+	}
+}
+
 func TestAutoWithoutCountdownDoesNotCreatePrompt(t *testing.T) {
 	m, _ := newTestManager(t)
 	eng := &fakeMaskEngine{}

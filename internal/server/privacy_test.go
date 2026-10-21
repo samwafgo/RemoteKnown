@@ -56,14 +56,25 @@ func doJSON(t *testing.T, h http.HandlerFunc, method, body string, hdr map[strin
 	return rec.Code, out
 }
 
+// 读配置接口返回 {options, presets}，取其中的 options 做断言
+func mustOptions(t *testing.T, body map[string]interface{}) map[string]interface{} {
+	t.Helper()
+	opt, ok := body["options"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("GET /api/privacy/config 缺少 options 字段: %v", body)
+	}
+	return opt
+}
+
 // 出厂默认必须是「关闭」：这个功能会遮住整块屏幕，不该有任何默认介入。
 func TestPrivacyDefaultTriggerIsOff(t *testing.T) {
 	srv, _ := newPrivacyServer(t, false)
 
-	code, body := doJSON(t, srv.handlePrivacyConfig, http.MethodGet, "", nil)
+	code, raw := doJSON(t, srv.handlePrivacyConfig, http.MethodGet, "", nil)
 	if code != http.StatusOK {
 		t.Fatalf("读配置状态码 = %d, 期望 200", code)
 	}
+	body := mustOptions(t, raw)
 	if body["trigger"] != privacyscreen.TriggerOff {
 		t.Errorf("默认触发方式 = %v, 期望 %q", body["trigger"], privacyscreen.TriggerOff)
 	}
@@ -72,6 +83,9 @@ func TestPrivacyDefaultTriggerIsOff(t *testing.T) {
 	}
 	if body["lock_on_end"] != false {
 		t.Errorf("默认 lock_on_end = %v, 期望 false（必须用户主动勾选）", body["lock_on_end"])
+	}
+	if presets, ok := raw["presets"].([]interface{}); !ok || len(presets) == 0 {
+		t.Errorf("GET 应返回内置背景图列表 presets, 实际 %v", raw["presets"])
 	}
 }
 
@@ -100,10 +114,11 @@ func TestPrivacyConfigRoundTrip(t *testing.T) {
 		t.Fatalf("写配置状态码 = %d, 期望 200", code)
 	}
 
-	code, body := doJSON(t, srv.handlePrivacyConfig, http.MethodGet, "", nil)
+	code, raw := doJSON(t, srv.handlePrivacyConfig, http.MethodGet, "", nil)
 	if code != http.StatusOK {
 		t.Fatalf("读配置状态码 = %d, 期望 200", code)
 	}
+	body := mustOptions(t, raw)
 	checks := map[string]interface{}{
 		"trigger":        "manual",
 		"auto_countdown": true,
@@ -129,7 +144,8 @@ func TestPrivacyConfigSanitizesBadValues(t *testing.T) {
 		t.Fatalf("写配置状态码 = %d, 期望 200", code)
 	}
 
-	_, body := doJSON(t, srv.handlePrivacyConfig, http.MethodGet, "", nil)
+	_, raw := doJSON(t, srv.handlePrivacyConfig, http.MethodGet, "", nil)
+	body := mustOptions(t, raw)
 	if body["trigger"] != privacyscreen.TriggerOff {
 		t.Errorf("非法 trigger 应回落为 off, 实际 %v", body["trigger"])
 	}

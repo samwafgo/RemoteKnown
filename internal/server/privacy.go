@@ -41,7 +41,10 @@ func (s *Server) handlePrivacyConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
-		writeJSON(w, http.StatusOK, s.privacy.Options())
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"options": s.privacy.Options(),
+			"presets": privacyscreen.BuiltinPresets,
+		})
 
 	case http.MethodPost:
 		// 改设置属于敏感操作，开了密码保护就要求已验证身份，

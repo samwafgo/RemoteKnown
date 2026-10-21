@@ -314,6 +314,11 @@ func imageToDIB(path string) (*dib, error) {
 	if err != nil {
 		return nil, fmt.Errorf("解码失败（支持 png / jpg / gif）: %w", err)
 	}
+	return imageToDIBFromImage(src)
+}
+
+// imageToDIBFromImage 把已解码的图片转成位图。
+func imageToDIBFromImage(src image.Image) (*dib, error) {
 	b := src.Bounds()
 	d, err := newDIB(b.Dx(), b.Dy())
 	if err != nil {
@@ -334,7 +339,7 @@ func imageToDIB(path string) (*dib, error) {
 // buildBackground 把底色和可选背景图按 fit 规则合成到一张与虚拟屏等大的位图上。
 // 之后所有重绘都从这张图 BitBlt —— 纯色和图片走同一条路径，
 // 擦除倒计时旧文字时也不会在背景图上留一道色杠。
-func buildBackground(w, h int, bgColor uint32, imgPath, fit string) (*dib, error) {
+func buildBackground(w, h int, bgColor uint32, imgPath, imgPreset, fit string) (*dib, error) {
 	bg, err := newDIB(w, h)
 	if err != nil {
 		return nil, err
@@ -345,6 +350,22 @@ func buildBackground(w, h int, bgColor uint32, imgPath, fit string) (*dib, error
 	pDeleteObject.Call(brush)
 
 	if imgPath == "" {
+		if imgPreset == "" || imgPreset == "none" {
+			return bg, nil
+		}
+		// 内置图走同一套缩放合成逻辑，失败就退回纯色
+		img, err := decodeBuiltinImage(imgPreset)
+		if err != nil {
+			log.Printf("[隐私屏] 内置背景图不可用，回退纯色: %v", err)
+			return bg, nil
+		}
+		src, err := imageToDIBFromImage(img)
+		if err != nil {
+			log.Printf("[隐私屏] 内置背景图合成失败，回退纯色: %v", err)
+			return bg, nil
+		}
+		defer src.release()
+		composeImage(bg, src, w, h, fit)
 		return bg, nil
 	}
 	src, err := imageToDIB(imgPath)
@@ -355,6 +376,12 @@ func buildBackground(w, h int, bgColor uint32, imgPath, fit string) (*dib, error
 	}
 	defer src.release()
 
+	composeImage(bg, src, w, h, fit)
+	return bg, nil
+}
+
+// composeImage 按 fit 规则把源位图叠到目标位图上。
+func composeImage(bg, src *dib, w, h int, fit string) {
 	pSetStretchBltMode.Call(bg.dc, halftone)
 	iw, ih := src.w, src.h
 	sx, sy := float64(w)/float64(iw), float64(h)/float64(ih)
@@ -378,7 +405,7 @@ func buildBackground(w, h int, bgColor uint32, imgPath, fit string) (*dib, error
 					src.dc, 0, 0, srcCopy)
 			}
 		}
-		return bg, nil
+		return
 	default: // cover
 		s := sx
 		if sy > s {
@@ -389,7 +416,6 @@ func buildBackground(w, h int, bgColor uint32, imgPath, fit string) (*dib, error
 	pStretchBlt.Call(bg.dc,
 		uintptr(int32((w-dw)/2)), uintptr(int32((h-dh)/2)), uintptr(dw), uintptr(dh),
 		src.dc, 0, 0, uintptr(iw), uintptr(ih), srcCopy)
-	return bg, nil
 }
 
 // ---------- 热键 ----------
@@ -575,6 +601,9 @@ type engine struct {
 	stopCh  chan struct{}
 	doneCh  chan struct{}
 	unlock  int32 // 原子标记：用户按了热键，等前端弹解锁框
+	// cursorHidden 记录当前系统光标是不是被我们藏起来了。
+	// 解锁框弹出期间要放出来，框关掉后再按原设置藏回去。
+	cursorHidden bool
 
 	onFail func(string)
 	// onStopped 引擎自己停下来时（到点撤除）回调，让上层能清状态、发通知
@@ -600,6 +629,29 @@ func (e *engine) uncoveredWindows() []string {
 func (e *engine) unlockPending() bool { return atomic.LoadInt32(&e.unlock) == 1 }
 func (e *engine) clearUnlockPending() { atomic.StoreInt32(&e.unlock, 0) }
 func (e *engine) markUnlockPending()  { atomic.StoreInt32(&e.unlock, 1) }
+
+// setCursorHidden 隐藏或恢复系统光标。
+// 光标是系统级的替换（SetSystemCursor），只有我们自己知道当前是不是藏着的，
+// 所以状态记在引擎上，避免重复调用或者漏恢复。
+func (e *engine) setCursorHidden(hidden bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.cursorHidden == hidden {
+		return
+	}
+	if hidden {
+		hideCursors()
+	} else {
+		restoreCursors()
+	}
+	e.cursorHidden = hidden
+}
+
+// cursorVisible 解锁框弹出时必须能看见鼠标，否则用户不知道鼠标在哪、点不到密码框。
+// 框关闭后按原设置藏回去。
+func (e *engine) syncCursorVisibility(hideCursor bool) {
+	e.setCursorHidden(hideCursor && !e.unlockPending())
+}
 
 func (e *engine) start(o Options) error {
 	e.mu.Lock()
@@ -672,7 +724,7 @@ func (e *engine) run(o Options, ready chan<- error, stopCh, doneCh chan struct{}
 	bgColor, _ := parseHexColor(o.BgColor)
 	fgColor, _ := parseHexColor(o.FgColor)
 
-	bg, err := buildBackground(int(vw), int(vh), bgColor, o.Image, o.Fit)
+	bg, err := buildBackground(int(vw), int(vh), bgColor, o.Image, o.ImagePreset, o.Fit)
 	if err != nil {
 		ready <- fmt.Errorf("背景合成失败: %w", err)
 		return
@@ -734,8 +786,8 @@ func (e *engine) run(o Options, ready chan<- error, stopCh, doneCh chan struct{}
 	}
 
 	if o.HideCursor {
-		hideCursors()
-		defer restoreCursors()
+		e.setCursorHidden(true)
+		defer e.setCursorHidden(false)
 	}
 
 	hk := parseHotkey(o.Hotkey)
@@ -872,6 +924,11 @@ func (e *engine) loop(hwnd uintptr, bg *dib, font uintptr, fg uint32, hk hotkey,
 		if !locked && !e.unlockPending() {
 			e.keeper.ensure(hwnd)
 		}
+
+		// 呼出解锁框期间把鼠标显示出来，用户才能操作密码框；
+		// 解锁结束后按原设置重新隐藏。syncCursorVisibility 自带
+		// 状态去重，只在解锁状态翻转时真正调系统 API。
+		e.syncCursorVisibility(o.HideCursor)
 
 		// 到点自动撤除。这一条不受密码约束 ——
 		// 密码 + 全屏遮罩叠在一起，程序一旦卡死就等于把人锁在屏幕外面。

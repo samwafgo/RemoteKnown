@@ -1566,9 +1566,13 @@
                         </div>
 
                         <div class="form-group">
-                            <label for="privacyImage">背景图片（可选）</label>
-                            <input type="text" id="privacyImage" placeholder="留空则用纯色">
-                            <div class="help-text">支持 png / jpg / gif，盖在底色上。图片读不出来会自动退回纯色。</div>
+                            <label>背景图片（可选）</label>
+                            <div style="display:flex; gap:8px; align-items:center;">
+                                <select id="privacyImagePreset" style="flex:1;" onchange="privacyImagePresetPick()"></select>
+                                <button type="button" class="action-link" onclick="privacyPickImage()">选择图片…</button>
+                            </div>
+                            <input type="text" id="privacyImage" placeholder="也可直接填写图片路径，留空则用上方选择">
+                            <div class="help-text">内置 3 张背景图即选即用；或点「选择图片…」从自己电脑挑一张（png / jpg / gif），盖在底色上。选自定义图片会停用内置图，图片读不出来会自动退回纯色。</div>
                         </div>
 
                         <div class="form-group">
@@ -2223,10 +2227,11 @@
 
         async function loadPrivacyTab() {
             try {
-                const [cfg, st] = await Promise.all([
-                    window.remoteAudit.privacyGetConfig(),
-                    window.remoteAudit.privacyGetStatus()
-                ]);
+                const resp = await window.remoteAudit.privacyGetConfig();
+                // 新版返回 {options, presets}，旧版直接是 options，两边都兼容
+                const cfg = resp && resp.options ? resp.options : resp;
+                const presets = resp && resp.presets ? resp.presets : [];
+                const st = await window.remoteAudit.privacyGetStatus();
 
                 const sel = document.getElementById('privacyPreset');
                 if (sel && !sel.options.length) {
@@ -2235,11 +2240,19 @@
                             '<option value="' + c[1] + '">' + c[2] + '（' + c[1] + '）</option>').join('');
                 }
 
+                // 背景图来源：内置图 / 纯色 / 自定义图片，三者单选
+                const imgSel = document.getElementById('privacyImagePreset');
+                imgSel.innerHTML = '<option value="none">不使用图片（纯色）</option>' +
+                    presets.map(p => '<option value="' + p.id + '">' + p.name + '（内置）</option>').join('') +
+                    '<option value="__custom__">自定义图片…</option>';
+
                 if (cfg) {
                     document.getElementById('privacyTrigger').value = cfg.trigger || 'off';
                     document.getElementById('privacyAutoCountdown').checked = !!cfg.auto_countdown;
                     document.getElementById('privacyBgColor').value = cfg.bg_color || '';
                     document.getElementById('privacyImage').value = cfg.image || '';
+                    imgSel.value = cfg.image ? '__custom__' : (cfg.image_preset || 'none');
+                    imgSel.dataset.current = imgSel.value;
                     document.getElementById('privacyFit').value = cfg.fit || 'cover';
                     document.getElementById('privacyShowText').checked = !!cfg.show_text;
                     document.getElementById('privacyText').value = cfg.text || '';
@@ -2281,12 +2294,40 @@
             }
         }
 
+        // 弹出系统文件框选背景图；选中后切到「自定义图片」，取消则保持原样。
+        async function privacyPickImage() {
+            const path = await window.remoteAudit.privacyPickImage();
+            if (!path) return;
+            document.getElementById('privacyImage').value = path;
+            const sel = document.getElementById('privacyImagePreset');
+            sel.value = '__custom__';
+            sel.dataset.current = '__custom__';
+        }
+
+        // 切换背景图来源：选内置图或纯色时清掉自定义路径，两者互斥。
+        function privacyImagePresetPick() {
+            const sel = document.getElementById('privacyImagePreset');
+            if (sel.value === '__custom__') {
+                privacyPickImage().then(() => {
+                    // 用户没选文件就回到之前的选项
+                    if (!document.getElementById('privacyImage').value) {
+                        sel.value = sel.dataset.current || 'none';
+                    }
+                });
+                return;
+            }
+            document.getElementById('privacyImage').value = '';
+            sel.dataset.current = sel.value;
+        }
+
         function collectPrivacyConfig() {
+            const imgPreset = document.getElementById('privacyImagePreset').value;
             return {
                 trigger: document.getElementById('privacyTrigger').value,
                 auto_countdown: document.getElementById('privacyAutoCountdown').checked,
                 bg_color: document.getElementById('privacyBgColor').value.trim(),
                 image: document.getElementById('privacyImage').value.trim(),
+                image_preset: imgPreset === '__custom__' ? '' : imgPreset,
                 fit: document.getElementById('privacyFit').value,
                 show_text: document.getElementById('privacyShowText').checked,
                 text: document.getElementById('privacyText').value,
